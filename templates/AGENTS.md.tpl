@@ -9,7 +9,7 @@
 3. открыть [архитектуру]({{link:architecture}}) и границы;
 4. сверить [договорённости кода]({{link:patterns}}) и [доступы]({{link:security}}).
 
-## Жёсткие правила
+## Обязательные правила
 
 <!-- generated:rules:begin -->
 <!-- generated:rules:end -->

@@ -481,6 +481,9 @@ class InitTests(unittest.TestCase):
         text = feature.read_text(encoding="utf-8")
         self.assertIn("| `health` | 200 | public | browser |", text)
         self.assertIn("ручной текст", text)
+        report = generate(self.request(adapter=adapter))
+        self.assertEqual(len(report.documents), 17)
+        self.assertEqual(report.features, (".project/features/login.md",))
 
     def test_feature_fragment_missing_file_is_error(self) -> None:
         adapter = self.target / "adapter.toml"

@@ -1,0 +1,13 @@
+{
+  "adapter": "adapter.toml",
+  "setup": [
+    {"write": {"path": "manifest.json", "text": "{\"dependencies\": {\"current\": \"1\"}}\n"}}
+  ],
+  "mutations": [
+    {"append": {"path": "profile.toml", "text": "\n[[stack.tools]]\nname = \"stale\"\nversion = \"1\"\nevidence = \"manifest.json\"\nprovenance = \"probe\"\n"}}
+  ],
+  "expect": [
+    {"code": "stale", "severity": "warning", "path": "stack.tools", "message": "не подтвердила: stale"}
+  ],
+  "exit": 0
+}

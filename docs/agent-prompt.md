@@ -58,7 +58,7 @@
 4. Интервью.
 Получи машиночитаемый батч для себя:
   ai-kit interview --plan --profile .pilot/base.toml --adapter .ai/source/adapter.toml --json
-Человеческую анкету собери по `docs/question-style.md`: там формула, примеры и запрет на машинные поля. Не показывай мне JSON, слоты и типы. Ответы сохрани в .pilot/answers.json (или answers.toml). Если поле осознанно неприменимо — `status = "not_applicable"` с причиной; «нет» в строковом поле решением не является.
+Человеческую анкету собери по `docs/question-style.md`: там формула, примеры и запрет на машинные поля. Не показывай мне JSON, слоты и типы. Если ответ — один из предложенных вариантов (да/нет, «подходит/поправить», подтверждение корней или ролей), дай выбрать окном выбора харнесса или нумерованным списком, а не заставляй печатать. Ответы сохрани в .pilot/answers.json (или answers.toml). Если поле осознанно неприменимо — `status = "not_applicable"` с причиной; «нет» в строковом поле решением не является.
 
 5. Генерация.
   ai-kit init --profile .pilot/base.toml --adapter .ai/source/adapter.toml --answers .pilot/answers.json --write-profile .ai/source/profile.toml

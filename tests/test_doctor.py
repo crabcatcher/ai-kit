@@ -1,12 +1,14 @@
 import io
 import json
 import sys
+import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from ai_kit import toml_writer
 from ai_kit.doctor import DoctorRequest, main, run
 from ai_kit.init import Request, generate
 
@@ -105,6 +107,28 @@ class DoctorTests(unittest.TestCase):
         data.update(overrides)
         lines = "\n".join(f'{key} = "{value}"' for key, value in data.items())
         return self.write_adapter("[[inputs]]\n" + lines + "\n")
+
+    def keys_adapter(self, extra: str = "") -> Path:
+        return self.write_adapter(
+            "[[probes]]\n"
+            'id = "deps"\n'
+            'globs = ["manifest.json"]\n'
+            'field = "stack.tools"\n'
+            'extract = "json-keys:dependencies"\n'
+            'provenance = "probe"\n'
+            + extra
+        )
+
+    def add_tool(self, name: str, evidence: str | None = "manifest.json", version: str | None = "1") -> None:
+        path = self.target / "profile.toml"
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        entry = {"name": name, "provenance": "probe"}
+        if version is not None:
+            entry["version"] = version
+        if evidence is not None:
+            entry["evidence"] = evidence
+        data.setdefault("stack", {}).setdefault("tools", []).append(entry)
+        path.write_text(toml_writer.dumps(data), encoding="utf-8")
 
     def append(self, relative: str, text: str) -> None:
         path = self.target / relative
@@ -232,6 +256,61 @@ class DoctorTests(unittest.TestCase):
             any(item.code == "inputs" and "нескольких файлах" in item.message for item in report.diagnostics),
             report.to_table(),
         )
+
+    def test_stale_probe_fact_warns(self) -> None:
+        (self.target / "manifest.json").write_text(
+            '{"dependencies": {"current": "1"}}', encoding="utf-8"
+        )
+        adapter = self.keys_adapter()
+        self.make(adapter)
+        self.add_tool("stale")
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "stale" and "не подтвердила: stale" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_stale_probe_miss_warns(self) -> None:
+        adapter = self.keys_adapter()
+        self.make(adapter)
+        self.add_tool("stale")
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(
+                item.code == "stale" and "не подтверждены" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
+    def test_stale_skipped_when_other_probe_on_field(self) -> None:
+        (self.target / "manifest.json").write_text(
+            '{"dependencies": {"current": "1"}}', encoding="utf-8"
+        )
+        adapter = self.keys_adapter(
+            "\n[[probes]]\n"
+            'id = "single"\n'
+            'globs = ["manifest.json"]\n'
+            'field = "stack.tools"\n'
+            'name = "single"\n'
+            'extract = "json:single"\n'
+            'provenance = "probe"\n'
+        )
+        self.make(adapter)
+        self.add_tool("stale")
+        report = self.doctor(adapter)
+        self.assertFalse(any(item.code == "stale" for item in report.diagnostics), report.to_table())
+
+    def test_stale_ignores_entry_without_evidence(self) -> None:
+        (self.target / "manifest.json").write_text(
+            '{"dependencies": {"current": "1"}}', encoding="utf-8"
+        )
+        adapter = self.keys_adapter()
+        self.make(adapter)
+        self.add_tool("hand", evidence=None, version=None)
+        report = self.doctor(adapter)
+        self.assertEqual([item for item in report.diagnostics if item.code == "profile"], [])
+        self.assertFalse(any(item.code == "stale" for item in report.diagnostics), report.to_table())
 
     def test_not_applicable_profile_is_accepted(self) -> None:
         self.make()

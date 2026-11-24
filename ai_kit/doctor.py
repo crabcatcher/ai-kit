@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dc_fields
 from pathlib import Path
 from typing import Any
 
-from ai_kit import baseline, detect, gates, inputs, precommit, profile, rules, templates
+from ai_kit import baseline, detect, gates, inputs, interview, precommit, profile, rules, templates
 from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.diagnostics import Diagnostic, Report
@@ -68,6 +68,7 @@ def run(request: DoctorRequest) -> Report:
     diagnostics.extend(_unknowns_diagnostics(documents, raw, request))
     diagnostics.extend(_features_diagnostics(documents, request, parsed))
     diagnostics.extend(_inputs_diagnostics(parsed, request))
+    diagnostics.extend(_stale_diagnostics(adapter, parsed, request))
     adapter_rules, rule_diagnostics = _adapter_rules(adapter)
     diagnostics.extend(rule_diagnostics)
     diagnostics.extend(_registry_diagnostics(documents, request, parsed, adapter_rules))
@@ -558,6 +559,80 @@ def _section_text(text: str, heading: str) -> str:
         return ""
     end = text.find("\n## ", start + 1)
     return text[start:] if end < 0 else text[start:end]
+
+
+def _stale_diagnostics(
+    adapter: dict[str, Any] | None,
+    parsed: profile.Profile,
+    request: DoctorRequest,
+) -> list[Diagnostic]:
+    if adapter is None:
+        return []
+    try:
+        probes = interview.load_probes(adapter)
+    except interview.InterviewError as error:
+        return [Diagnostic("adapter", "error", "probes", str(error))]
+    other_fields = {
+        probe.field
+        for probe in probes
+        if probe.extract.split(":", 1)[0] not in ("json-keys", "toml-keys")
+    }
+    keys_probes = [
+        probe
+        for probe in probes
+        if probe.extract.split(":", 1)[0] in ("json-keys", "toml-keys")
+        and probe.field not in other_fields
+    ]
+    if not keys_probes:
+        return []
+    hits, misses = interview.run_probes(request.root, keys_probes)
+    hit_names: dict[str, set[str]] = {}
+    for hit in hits:
+        hit_names.setdefault(hit.probe_id, set()).add(hit.name or "")
+    miss_reasons = {miss.probe_id: miss.reason for miss in misses}
+    diagnostics: list[Diagnostic] = []
+    for probe in keys_probes:
+        names = _stack_names(parsed, probe.field)
+        if probe.id in miss_reasons:
+            if names:
+                diagnostics.append(
+                    Diagnostic(
+                        "stale",
+                        "warning",
+                        probe.field,
+                        f"проба {probe.id} не нашла значение ({miss_reasons[probe.id]}); "
+                        "старые факты поля не подтверждены: " + ", ".join(sorted(names)),
+                    )
+                )
+            continue
+        stale = names - hit_names.get(probe.id, set())
+        if stale:
+            diagnostics.append(
+                Diagnostic(
+                    "stale",
+                    "warning",
+                    probe.field,
+                    f"проба {probe.id} не подтвердила: " + ", ".join(sorted(stale)),
+                )
+            )
+    return diagnostics
+
+
+def _stack_names(parsed: profile.Profile, field: str) -> set[str]:
+    if not field.startswith("stack."):
+        return set()
+    key = field.split(".", 1)[1]
+    stack_fields = {item.name for item in dc_fields(profile.Stack)}
+    if key not in stack_fields:
+        return set()
+    items = getattr(parsed.stack, key)
+    if not isinstance(items, list):
+        return set()
+    return {
+        item.name
+        for item in items
+        if item.provenance == "probe" and item.evidence
+    }
 
 
 def _code_paths(text: str) -> list[str]:

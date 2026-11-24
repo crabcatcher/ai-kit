@@ -1,0 +1,6 @@
+[[probes]]
+id = "deps"
+globs = ["manifest.json"]
+field = "stack.tools"
+extract = "json-keys:dependencies"
+provenance = "probe"

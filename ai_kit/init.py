@@ -199,11 +199,11 @@ def _overwritten(target: Path, files: list[tuple[Path, str]]) -> tuple[str, ...]
         if not path.exists():
             continue
         try:
-            current = path.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError):
+            current = path.read_bytes()
+        except OSError:
             result.append(_display(target, path))
             continue
-        if current != text:
+        if current != text.encode("utf-8"):
             result.append(_display(target, path))
     return tuple(result)
 
@@ -321,6 +321,7 @@ def _index_adapter_fragments(
     request: Request,
 ) -> dict[str, dict[str, str]]:
     paths = {document.id: templates.document_path(document, values) for document in documents}
+    by_path = {templates.document_path(document, values): document for document in documents}
     index: dict[str, dict[str, str]] = {}
     for position, entry in enumerate(adapter.get("docs_fragments", [])):
         place = f"docs_fragments[{position}]"
@@ -342,13 +343,55 @@ def _index_adapter_fragments(
             for document_id, path in paths.items()
             if target in (document_id, path, _relative_to_docs(path, values))
         ]
-        if len(matches) != 1:
+        if len(matches) > 1:
             raise InitError(f"{place}.target: {target} не указывает ровно один документ")
-        bucket = index.setdefault(matches[0], {})
+        if matches:
+            relative = matches[0]
+            if "/templates/" in relative:
+                raise InitError(
+                    f"{place}.target: {target} — шаблон документа, а не документ проекта; "
+                    "docs_fragments туда не целятся"
+                )
+            document = by_path[relative]
+            source = (request.kit_root / document.template).read_text(encoding="utf-8")
+            name = marker.split(":", 1)[1]
+            if name not in templates.marker_names(source, "adapter"):
+                raise InitError(f"{place}.marker: маркера {marker} нет в шаблоне {document.template}")
+        else:
+            relative = _feature_target(target, place, values, request)
+            if relative is None:
+                raise InitError(f"{place}.target: {target} не указывает ровно один документ")
+        bucket = index.setdefault(relative, {})
         if marker in bucket:
             raise InitError(f"{place}.marker: {marker} задан дважды для {target}")
         bucket[marker] = content
     return index
+
+
+def _feature_target(
+    target: str,
+    place: str,
+    values: dict[str, Any],
+    request: Request,
+) -> str | None:
+    docs_dir = values.get("docs", {}).get("dir")
+    if not isinstance(docs_dir, str) or not docs_dir or "\\" in target:
+        return None
+    prefix = docs_dir.rstrip("/") + "/"
+    name = target[len(prefix):] if target.startswith(prefix) else target
+    parts = name.split("/")
+    if len(parts) != 2 or parts[0] != "features" or not parts[1].endswith(".md"):
+        return None
+    if re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*\.md", parts[1]) is None:
+        return None
+    relative = f"{docs_dir.rstrip('/')}/features/{parts[1]}"
+    path = _safe_path(request.target, relative, "фрагмент")
+    if not path.is_file():
+        raise InitError(
+            f"{place}.target: файла функции нет: {relative}; "
+            "создайте его вручную или уберите docs_fragments"
+        )
+    return relative
 
 
 def _fragment_content(entry: dict[str, Any], place: str, request: Request) -> str:
@@ -393,8 +436,10 @@ def _relative_to_docs(path: str, values: dict[str, Any]) -> str:
 
 def _render_all(plan: Plan, request: Request) -> list[tuple[Path, str]]:
     outputs: list[tuple[Path, str]] = []
+    rendered: set[str] = set()
     for document in plan.documents:
         relative = templates.document_path(document, plan.values)
+        rendered.add(relative)
         path = _safe_path(request.target, relative, document.id)
         source = (request.kit_root / document.template).read_text(encoding="utf-8")
         existing = path.read_text(encoding="utf-8") if path.is_file() else None
@@ -408,6 +453,26 @@ def _render_all(plan: Plan, request: Request) -> list[tuple[Path, str]]:
             fragments=fragments,
         )
         outputs.append((path, templates.render_document(context)))
+
+    for relative, fragments in plan.fragments.items():
+        if relative in rendered:
+            continue
+        path = _safe_path(request.target, relative, "фрагмент")
+        if not path.is_file():
+            raise InitError(f"файла функции нет: {relative}; создайте его вручную или уберите docs_fragments")
+        raw = path.read_bytes()
+        try:
+            existing = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise InitError(f"файл функции не в UTF-8: {relative}") from error
+        first = existing.find("\n")
+        newline = "\r\n" if first > 0 and existing[first - 1] == "\r" else "\n"
+        text = templates.fill_fragments(existing, fragments, where=relative, newline=newline)
+        if text == existing:
+            continue
+        if raw.startswith(b"\xef\xbb\xbf"):
+            text = "\ufeff" + text
+        outputs.append((path, text))
     return outputs
 
 
@@ -560,6 +625,18 @@ def _write_all(files: list[tuple[Path, str]]) -> None:
     staged: list[tuple[Path, Path]] = []
     try:
         for path, text in files:
+            desired = text.encode("utf-8")
+            if path.is_file():
+                try:
+                    if path.read_bytes() == desired:
+                        if path.name == "pre-commit" and path.parent.name == "hooks":
+                            try:
+                                path.chmod(0o755)
+                            except OSError:
+                                pass
+                        continue
+                except OSError:
+                    pass
             path.parent.mkdir(parents=True, exist_ok=True)
             descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
             with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:

@@ -386,41 +386,48 @@ def _features_diagnostics(
     folder = _inside(request.root, f"{parsed.docs.dir}/features")
     if folder is None or not folder.is_dir():
         return []
-    text = _document_text(documents, request, parsed, "features-index")
-    if text is None:
-        return []
+    index_text = _document_text(documents, request, parsed, "features-index")
     diagnostics: list[Diagnostic] = []
     listed: set[str] = set()
-    for line in text.splitlines():
-        if not line.strip().startswith("|"):
-            continue
-        for match in FEATURE_LINK.finditer(line):
-            relative = match.group(1)
-            listed.add(relative)
-            target = _inside(request.root, f"{parsed.docs.dir}/{relative}")
-            if target is None or not target.is_file():
-                diagnostics.append(
-                    Diagnostic("features", "error", "FEATURES.md", f"файла функции нет: {relative}")
-                )
+    if index_text is not None:
+        for line in index_text.splitlines():
+            if not line.strip().startswith("|"):
+                continue
+            for match in FEATURE_LINK.finditer(line):
+                relative = match.group(1)
+                listed.add(relative)
+                target = _inside(request.root, f"{parsed.docs.dir}/{relative}")
+                if target is None or not target.is_file():
+                    diagnostics.append(
+                        Diagnostic("features", "error", "FEATURES.md", f"файла функции нет: {relative}")
+                    )
     for path in sorted(folder.glob("*.md")):
         relative = f"features/{path.name}"
-        if relative not in listed:
+        if index_text is not None and relative not in listed:
             diagnostics.append(
                 Diagnostic("features", "error", "FEATURES.md", f"функция не внесена в карту: {relative}")
             )
         try:
-            text = path.read_text(encoding="utf-8-sig")
+            content = path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError) as error:
             diagnostics.append(
                 Diagnostic("features", "error", relative, f"файл функции не читается: {error}")
             )
             continue
         for section in FEATURE_SECTIONS:
-            if section not in text:
+            if section not in content:
                 diagnostics.append(
                     Diagnostic("features", "error", relative, f"нет обязательного раздела: {section[3:]}")
                 )
-        for code_path in _code_paths(text):
+        for error in templates.validate_markers(content):
+            diagnostics.append(Diagnostic("marker", "error", relative, error))
+        for empty in templates.empty_sections(content):
+            diagnostics.append(Diagnostic("section", "warning", relative, f"пустой раздел {empty}"))
+        for match in EMPTY_ADAPTER.finditer(content):
+            diagnostics.append(
+                Diagnostic("adapter", "warning", relative, f"фрагмент adapter:{match.group(1)} не заполнен")
+            )
+        for code_path in _code_paths(content):
             target = _inside(request.root, code_path)
             if target is None or not target.exists():
                 diagnostics.append(

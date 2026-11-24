@@ -441,14 +441,31 @@ def _insert_fragments(text: str, context: RenderContext) -> str:
             rf"(<!-- {kind}:{re.escape(name)}:begin -->)\n?(.*?)(<!-- {kind}:{re.escape(name)}:end -->)",
             re.DOTALL,
         )
-        if pattern.search(text) is None:
+        match = pattern.search(text)
+        if match is None:
             raise TemplateError([f"фрагмент {key}: маркера нет в шаблоне"])
         body = fragment.strip()
+        if _table_starts(body) and _table_ends(text[: match.start()]):
+            raise TemplateError([f"{key}: шапка таблицы уже есть в шаблоне"])
         begin = f"<!-- {kind}:{name}:begin -->"
         end = f"<!-- {kind}:{name}:end -->"
         replacement = f"{begin}\n{body}\n{end}" if body else f"{begin}\n{end}"
         text = pattern.sub(lambda _: replacement, text, count=1)
     return text
+
+
+def _table_starts(text: str) -> bool:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return len(lines) >= 2 and lines[0].startswith("|") and _is_table_separator(lines[1])
+
+
+def _table_ends(text: str) -> bool:
+    lines = text.splitlines()
+    return (
+        len(lines) >= 2
+        and lines[-2].strip().startswith("|")
+        and _is_table_separator(lines[-1].strip())
+    )
 
 
 def _validate_fragment(key: str, fragment: str) -> None:

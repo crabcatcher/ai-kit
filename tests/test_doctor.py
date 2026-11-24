@@ -126,6 +126,64 @@ class DoctorTests(unittest.TestCase):
             any(item.code == "placeholder" and "<T>" in item.message for item in report.diagnostics)
         )
 
+    def test_technical_angle_notation_is_not_placeholder(self) -> None:
+        self.make()
+        self.append(
+            ".project/development.md",
+            "\nprod/<регион>, /Api/Db/<Сущность>/<Действие>, <https://example.com>.\n",
+        )
+        report = self.doctor()
+        placeholders = [item for item in report.diagnostics if item.code == "placeholder"]
+        self.assertFalse(
+            any(
+                token in item.message
+                for item in placeholders
+                for token in ("<регион>", "<Сущность>", "<Действие>", "https://example.com")
+            ),
+            report.to_table(),
+        )
+
+    def test_plain_angle_placeholder_still_warns(self) -> None:
+        self.make()
+        self.append(".project/development.md", "\nСмотри <куда-то>.\n")
+        report = self.doctor()
+        self.assertTrue(
+            any(item.code == "placeholder" and "<куда-то>" in item.message for item in report.diagnostics)
+        )
+
+    def test_angle_before_path_warns(self) -> None:
+        self.make()
+        self.append(".project/development.md", "\n<домен>/api/v1\n")
+        report = self.doctor()
+        self.assertTrue(
+            any(item.code == "placeholder" and "<домен>" in item.message for item in report.diagnostics)
+        )
+
+    def test_unknown_field_must_be_visible(self) -> None:
+        self.make()
+        path = self.target / ".project" / "architecture.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("stack.stores[0].version", "скрыто"), encoding="utf-8")
+        report = self.doctor()
+        self.assertTrue(
+            any(
+                item.code == "document" and "stack.stores[0].version" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
+    def test_unknown_field_visible_by_default(self) -> None:
+        self.make()
+        report = self.doctor()
+        self.assertFalse(
+            any(
+                item.code == "document" and "поля профиля не видны" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
     def test_fixture_gates_are_not_run_without_flag(self) -> None:
         self.make(FIXTURE)
         report = self.doctor(FIXTURE)

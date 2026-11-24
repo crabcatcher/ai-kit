@@ -25,7 +25,7 @@ MAX_PROBE_BYTES = 2 * 1024 * 1024
 
 ANSWER_STATUSES = ("answered", "unknown", "not_applicable")
 EXTRACT_KINDS = ("json", "toml", "regex", "none")
-EXTRACT_PATH = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+|\\\.[A-Za-z0-9_-]+)*$")
+EXTRACT_PATH = re.compile(r"^[A-Za-z0-9_@/-]+(?:\.[A-Za-z0-9_@/-]+|\\\.[A-Za-z0-9_@/-]+)*$")
 DRIVE = re.compile(r"^[A-Za-z]:")
 
 ABSENT = object()
@@ -91,6 +91,8 @@ class AnswerStats:
     asked: int
     answered: int
     ignored: int
+    decisions: int = 0
+    facts: int = 0
 
 
 @dataclass(frozen=True)
@@ -349,8 +351,9 @@ def parse_probes(entries: Any) -> list[Probe]:
             errors.append((f"{place}.extract", "ожидается правило извлечения"))
         else:
             _validate_extract(extract, f"{place}.extract", errors)
-        if version == "none" and extract != "none":
-            errors.append((f"{place}.extract", "при version = none значение не извлекается"))
+
+        if extract == "none" and version != "none":
+            errors.append((f"{place}.extract", "none допустим только при version = none"))
 
         if entry.get("provenance") != "probe":
             errors.append((f"{place}.provenance", "проба всегда даёт probe"))
@@ -401,7 +404,13 @@ def _validate_extract(extract: str, path: str, errors: list[tuple[str, str]]) ->
         except re.error as error:
             errors.append((path, f"регулярное выражение не разбирается: {error}"))
     elif EXTRACT_PATH.fullmatch(argument) is None:
-        errors.append((path, "путь задаётся точками: латинские буквы, цифры, дефис, подчёркивание"))
+        errors.append(
+            (
+                path,
+                "путь задаётся точками: латинские буквы, цифры, @, /, дефис, подчёркивание; "
+                r"точка разделяет, \. — literal",
+            )
+        )
 
 
 def run_probes(root: Path, probes: list[Probe]) -> tuple[list[ProbeHit], list[ProbeMiss]]:
@@ -543,6 +552,8 @@ def _upsert_evidence(values: dict[str, Any], field_name: str, entry: dict[str, s
         raise InterviewError([(field_name, "ожидается список доказательств")])
     for index, item in enumerate(existing):
         if isinstance(item, dict) and item.get("name") == entry["name"]:
+            if "version" not in entry and isinstance(item.get("version"), str):
+                return
             existing[index] = entry
             return
     existing.append(entry)
@@ -763,6 +774,8 @@ def apply_answers(
     unknowns: list[dict[str, str]] = []
     answered = 0
     ignored = 0
+    decisions = 0
+    facts = 0
 
     for answer in answers:
         question = slot_question.get(answer.slot)
@@ -780,8 +793,12 @@ def apply_answers(
                 raise InterviewError([(answer.slot, "обязательное поле нельзя объявить неприменимым")])
             if not answer.reason:
                 raise InterviewError([(answer.slot, "нужна причина, почему поле неприменимо")])
+            if answer.slot in not_applicable_fields(result):
+                ignored += 1
+                continue
             _set_not_applicable(result, answer.slot, answer.reason)
             answered += 1
+            decisions += 1
             continue
         if known:
             names = []
@@ -802,6 +819,7 @@ def apply_answers(
             _clear_not_applicable(result, answer.slot)
             _append_evidence(result, answer.slot, {"name": answer.name, "provenance": "answer"})
             answered += 1
+            facts += 1
             if answer.version == "none":
                 continue
             if answer.version:
@@ -815,6 +833,7 @@ def apply_answers(
         _clear_not_applicable(result, answer.slot)
         _set_slot(result, answer.slot, answer.value)
         answered += 1
+        decisions += 1
 
     known_unknowns = {entry["field"] for entry in unknowns}
     not_applicable = not_applicable_fields(result)
@@ -824,7 +843,13 @@ def apply_answers(
                 unknowns.append({"field": slot, "question": question.text})
                 known_unknowns.add(slot)
 
-    return result, unknowns, AnswerStats(asked=len(batch), answered=answered, ignored=ignored)
+    return result, unknowns, AnswerStats(
+        asked=len(batch),
+        answered=answered,
+        ignored=ignored,
+        decisions=decisions,
+        facts=facts,
+    )
 
 
 def _set_not_applicable(values: dict[str, Any], field_name: str, reason: str) -> None:
@@ -917,9 +942,11 @@ def report(result: InterviewResult) -> str:
         "| Что | Сколько |",
         "|---|---|",
         f"| фактов подтверждено (`probe`) | {probe_facts} |",
-        f"| фактов получено ответом (`answer`) | {answer_facts} |",
+        f"| фактов о стеке из ответа (`answer`, профиль) | {answer_facts} |",
+        f"| из них добавлено этим прогоном | {result.stats.facts} |",
         f"| вопросов задано | {result.stats.asked} |",
         f"| ответов получено | {result.stats.answered} |",
+        f"| решений человека (поля вне стека) | {result.stats.decisions} |",
         f"| ответов проигнорировано (уже подтверждено) | {result.stats.ignored} |",
         f"| полей намеренно неприменимо | {len(not_applicable)} |",
         f"| осталось неизвестным | {len(result.unknowns)} |",

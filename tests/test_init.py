@@ -357,6 +357,17 @@ class InitTests(unittest.TestCase):
         with self.assertRaises(TemplateError):
             generate(self.request(adapter=adapter))
 
+    def test_fragment_with_duplicate_table_header_is_rejected(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "architecture.md"\n'
+            'marker = "adapter:decisions"\n'
+            'content = "| Решение | Причина | Что отвергли |\\n|---|---|---|\\n| x | y | z |"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(TemplateError):
+            generate(self.request(adapter=adapter))
+
     def test_adapter_commands_fill_missing_roles(self) -> None:
         data = apply_commands({"tests": {}}, {"commands": [{"role": "test", "command": "run-tests"}]})
         self.assertEqual(data["tests"]["commands"], {"test": "run-tests"})

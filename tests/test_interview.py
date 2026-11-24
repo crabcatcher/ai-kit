@@ -16,6 +16,7 @@ from ai_kit.interview import (
     InterviewError,
     Prepared,
     Probe,
+    ProbeHit,
     Question,
     apply_answers,
     apply_probe_hits,
@@ -206,6 +207,27 @@ class ProbeParsingTests(unittest.TestCase):
         probes = parse_probes([self.probe(extract=r"json:dependencies.socket\.io")])
         self.assertEqual(probes[0].extract, r"json:dependencies.socket\.io")
 
+    def test_at_and_slash_in_path_allowed(self) -> None:
+        probes = parse_probes([self.probe(extract="json:dependencies.@dx/ecg-markup")])
+        self.assertEqual(probes[0].extract, "json:dependencies.@dx/ecg-markup")
+
+    def test_presence_probe_with_match_rule_allowed(self) -> None:
+        probes = parse_probes(
+            [
+                {
+                    "id": "postgres",
+                    "globs": ["package.json"],
+                    "field": "stack.stores",
+                    "name": "postgres",
+                    "version": "none",
+                    "extract": "regex:postgres",
+                    "provenance": "probe",
+                }
+            ]
+        )
+        self.assertFalse(probes[0].version_required)
+        self.assertEqual(probes[0].extract, "regex:postgres")
+
     def test_provenance_answer_rejected(self) -> None:
         self.assert_error([self.probe(provenance="answer")], "probes[0].provenance")
 
@@ -224,6 +246,9 @@ class ProbeParsingTests(unittest.TestCase):
         )
         self.assertFalse(probes[0].version_required)
         self.assertEqual(probes[0].extract, "none")
+
+    def test_none_requires_version_none(self) -> None:
+        self.assert_error([self.probe(extract="none")], "probes[0].extract")
 
     def test_duplicate_probe_id_rejected(self) -> None:
         self.assert_error([self.probe(), self.probe()], "probes[1].id")
@@ -267,6 +292,60 @@ class ProbeRunTests(unittest.TestCase):
         )
         hits, _ = run_probes(self.root, [probe])
         self.assertEqual(hits[0].value, "1.2")
+
+    def test_at_and_slash_key_probe(self) -> None:
+        self.write("manifest.json", '{"dependencies": {"@dx/ecg-markup": "2.0"}}')
+        probe = Probe(
+            "framework",
+            ("manifest.json",),
+            "stack.frameworks",
+            "json:dependencies.@dx/ecg-markup",
+            "ecg",
+        )
+        hits, _ = run_probes(self.root, [probe])
+        self.assertEqual(hits[0].value, "2.0")
+
+    def test_presence_probe_requires_mention(self) -> None:
+        self.write("manifest.json", '{"dependencies": {"pg": "1.0"}}')
+        probe = Probe(
+            "postgres",
+            ("manifest.json",),
+            "stack.stores",
+            "regex:postgres",
+            "postgres",
+            version_required=False,
+        )
+        hits, misses = run_probes(self.root, [probe])
+        self.assertEqual(hits, [])
+        self.assertIn("значение не найдено", misses[0].reason)
+
+    def test_presence_probe_hits_on_mention(self) -> None:
+        self.write("manifest.json", '{"dependencies": {"postgres": "16"}}')
+        probe = Probe(
+            "postgres",
+            ("manifest.json",),
+            "stack.stores",
+            "regex:postgres",
+            "postgres",
+            version_required=False,
+        )
+        hits, misses = run_probes(self.root, [probe])
+        self.assertEqual(misses, [])
+        self.assertIsNone(hits[0].value)
+
+    def test_presence_hit_keeps_proven_version(self) -> None:
+        values = {
+            "stack": {
+                "stores": [
+                    {"name": "postgres", "version": "16", "evidence": "old", "provenance": "probe"}
+                ]
+            }
+        }
+        result = apply_probe_hits(
+            values,
+            [ProbeHit("postgres", "stack.stores", "postgres", None, "manifest.json")],
+        )
+        self.assertEqual(result["stack"]["stores"][0]["version"], "16")
 
     def test_regex_probe_takes_first_group(self) -> None:
         self.write("VERSION", "release = 3.4.5\n")
@@ -429,6 +508,14 @@ class AnswerTests(unittest.TestCase):
                 [item],
                 [Answer("tests.framework", status="not_applicable", reason="нет")],
             )
+
+    def test_repeated_not_applicable_is_ignored(self) -> None:
+        item = question(id="tests", slots=("tests.framework",))
+        answer = Answer("tests.framework", status="not_applicable", reason="нет")
+        values, _, _ = apply_answers({}, [item], [item], [answer])
+        _, _, stats = apply_answers(values, [item], [item], [answer])
+        self.assertEqual(stats.decisions, 0)
+        self.assertEqual(stats.ignored, 1)
 
     def test_parse_rejects_not_applicable_for_pre_commit(self) -> None:
         with self.assertRaises(InterviewError):
@@ -657,8 +744,22 @@ class FinishTests(unittest.TestCase):
         prepared = prepare({}, self.root, [], bank)
         result = finish(prepared, [Answer("project.purpose", value="продукт")])
         text = report(result)
-        self.assertIn("| фактов получено ответом (`answer`) | 0 |", text)
+        self.assertIn("| фактов о стеке из ответа (`answer`, профиль) | 0 |", text)
+        self.assertIn("| решений человека (поля вне стека) | 1 |", text)
         self.assertIn("| вопросов задано | 1 |", text)
+
+    def test_report_decisions_are_per_run(self) -> None:
+        values = {
+            "stack": {
+                "frameworks": [{"name": "framework", "provenance": "answer"}],
+            }
+        }
+        item = question()
+        bank = merge_questions([], [item])
+        result = finish(prepare(values, self.root, [], bank), [Answer("project.purpose", value="продукт")])
+        text = report(result)
+        self.assertIn("| фактов о стеке из ответа (`answer`, профиль) | 1 |", text)
+        self.assertIn("| решений человека (поля вне стека) | 1 |", text)
 
     def test_report_names_unknowns(self) -> None:
         item = question()

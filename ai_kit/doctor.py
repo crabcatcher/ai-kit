@@ -18,7 +18,7 @@ from ai_kit.toml_io import TomlError, load as load_toml
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
 FEATURE_LINK = re.compile(r"`([^`]+\.md)`")
 EMPTY_ADAPTER = re.compile(r"<!-- adapter:([a-z0-9-]+):begin -->\s*<!-- adapter:\1:end -->")
-PLACEHOLDER = re.compile(r"<[^<>\n]{1,40}>")
+PLACEHOLDER = re.compile(r"(?<![\w/])<[^<>\n]{1,40}>")
 FEATURE_SECTIONS = ("## Назначение", "## Логика", "## Контракты", "## Где в коде", "## Нюансы", "## Что не разобрано")
 CODE_PATH = re.compile(r"`([^`]+)`")
 EXTERNAL = ("http://", "https://", "mailto:", "tel:")
@@ -65,6 +65,7 @@ def run(request: DoctorRequest) -> Report:
         return Report(tuple(diagnostics))
 
     diagnostics.extend(_document_diagnostics(documents, raw, request))
+    diagnostics.extend(_unknowns_diagnostics(documents, raw, request))
     diagnostics.extend(_features_diagnostics(documents, request, parsed))
     adapter_rules, rule_diagnostics = _adapter_rules(adapter)
     diagnostics.extend(rule_diagnostics)
@@ -168,6 +169,49 @@ def _document_diagnostics(
     return diagnostics
 
 
+def _unknowns_diagnostics(
+    documents: list[templates.Document],
+    values: dict[str, Any],
+    request: DoctorRequest,
+) -> list[Diagnostic]:
+    fields: list[str] = []
+    for key in ("unknowns", "not_applicable"):
+        entries = values.get(key, [])
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("field"), str):
+                fields.append(entry["field"])
+    if not fields:
+        return []
+    document = next((item for item in documents if item.id == "architecture"), None)
+    if document is None:
+        return []
+    relative = templates.document_path(document, values)
+    path = _inside(request.root, relative)
+    if path is None or not path.is_file():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return []
+    missing = [
+        field
+        for field in dict.fromkeys(fields)
+        if re.search(rf"(?<![\w.\[]){re.escape(field)}(?![\w.\[])", text) is None
+    ]
+    if not missing:
+        return []
+    return [
+        Diagnostic(
+            "document",
+            "warning",
+            relative,
+            "поля профиля не видны в документе: " + ", ".join(missing),
+        )
+    ]
+
+
 def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
     visible = _visible_text(text)
@@ -187,7 +231,9 @@ def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
             diagnostics.append(
                 Diagnostic("adapter", "warning", relative, f"фрагмент adapter:{match.group(1)} не заполнен")
             )
-        for match in PLACEHOLDER.finditer(visible):
+        for match in PLACEHOLDER.finditer(_angle_text(text)):
+            if "://" in match.group(0):
+                continue
             diagnostics.append(
                 Diagnostic("placeholder", "warning", relative, f"незаполненная заглушка: {match.group(0)}")
             )
@@ -199,6 +245,10 @@ def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
 def _visible_text(text: str) -> str:
     visible = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
     return re.sub(r"```.*?```", "", visible, flags=re.DOTALL)
+
+
+def _angle_text(text: str) -> str:
+    return re.sub(r"`[^`\n]*`", "", _visible_text(text))
 
 
 def _link_diagnostics(text: str, path: Path, relative: str, root: Path) -> list[Diagnostic]:

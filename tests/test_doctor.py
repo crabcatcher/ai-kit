@@ -122,7 +122,7 @@ class DoctorTests(unittest.TestCase):
         self.make()
         (self.target / "baseline.toml").write_text(
             'schema_version = "1"\n\n'
-            '[[violation]]\nrule = "A404"\npath = "app/Legacy.php"\n'
+            '[[violation]]\nrule = "A404"\npath = "src/Legacy"\n'
             'reason = "старое"\nowner = "владелец"\ntrigger = "—"\n',
             encoding="utf-8",
         )
@@ -133,7 +133,7 @@ class DoctorTests(unittest.TestCase):
         self.make()
         (self.target / "custom-baseline.toml").write_text(
             'schema_version = "1"\n\n'
-            '[[violation]]\nrule = "A404"\npath = "app/Legacy.php"\n'
+            '[[violation]]\nrule = "A404"\npath = "src/Legacy"\n'
             'reason = "старое"\nowner = "владелец"\ntrigger = "—"\n',
             encoding="utf-8",
         )

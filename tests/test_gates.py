@@ -28,7 +28,7 @@ def gate(**overrides) -> dict:
         "id": "check",
         "invariant": "Инвариант",
         "requires": {"binary": PYTHON, "version": ">=3"},
-        "command": ["python", "-c", "import sys; sys.exit(0)"],
+        "command": [PYTHON, "-c", "import sys; sys.exit(0)"],
         "on_unavailable": "gap",
     }
     data.update(overrides)
@@ -37,7 +37,7 @@ def gate(**overrides) -> dict:
 
 class VersionTests(unittest.TestCase):
     def test_parse_version(self) -> None:
-        self.assertEqual(parse_version("Python 3.12.10"), "3.12.10")
+        self.assertEqual(parse_version("Runtime 3.12.10"), "3.12.10")
         self.assertIsNone(parse_version("unknown"))
 
     def test_satisfies_range(self) -> None:

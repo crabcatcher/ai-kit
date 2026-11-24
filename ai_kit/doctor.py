@@ -18,6 +18,8 @@ from ai_kit.toml_io import TomlError, load as load_toml
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
 FEATURE_LINK = re.compile(r"`([^`]+\.md)`")
 EMPTY_ADAPTER = re.compile(r"<!-- adapter:([a-z0-9-]+):begin -->\s*<!-- adapter:\1:end -->")
+PLACEHOLDER = re.compile(r"<[^<>\n]{1,40}>")
+FEATURE_SECTIONS = ("## Назначение", "## Логика", "## Контракты", "## Где в коде", "## Нюансы", "## Что не разобрано")
 EXTERNAL = ("http://", "https://", "mailto:", "tel:")
 
 
@@ -183,6 +185,12 @@ def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
             diagnostics.append(
                 Diagnostic("adapter", "warning", relative, f"фрагмент adapter:{match.group(1)} не заполнен")
             )
+        for match in PLACEHOLDER.finditer(text):
+            diagnostics.append(
+                Diagnostic("placeholder", "warning", relative, f"незаполненная заглушка: {match.group(0)}")
+            )
+        if "TODO" in text:
+            diagnostics.append(Diagnostic("placeholder", "warning", relative, "в документе остался TODO"))
     return diagnostics
 
 
@@ -285,10 +293,19 @@ def _baseline_diagnostics(request: DoctorRequest, rule_ids: set[str]) -> list[Di
         data = load_toml(path)
     except (OSError, TomlError) as error:
         return [Diagnostic("baseline", "error", request.baseline, f"baseline не читается: {error}")]
-    return [
+    errors = baseline.violation_errors(data, rule_ids)
+    diagnostics = [
         Diagnostic("baseline", "error", f"{request.baseline}:{place}" if place else request.baseline, message)
-        for place, message in baseline.violation_errors(data, rule_ids)
+        for place, message in errors
     ]
+    if errors:
+        return diagnostics
+    for violation in baseline.parse(data, rule_ids):
+        if not (request.root / violation.path.split(":", 1)[0]).exists():
+            diagnostics.append(
+                Diagnostic("baseline", "warning", request.baseline, f"файла из baseline нет: {violation.path}")
+            )
+    return diagnostics
 
 
 def _precommit_diagnostics(request: DoctorRequest, parsed: profile.Profile) -> list[Diagnostic]:
@@ -333,6 +350,12 @@ def _features_diagnostics(
             diagnostics.append(
                 Diagnostic("features", "error", "FEATURES.md", f"функция не внесена в карту: {relative}")
             )
+        text = path.read_text(encoding="utf-8")
+        for section in FEATURE_SECTIONS:
+            if section not in text:
+                diagnostics.append(
+                    Diagnostic("features", "error", relative, f"нет обязательного раздела: {section[3:]}")
+                )
     return diagnostics
 
 

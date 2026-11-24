@@ -14,22 +14,25 @@ class PrecommitTests(unittest.TestCase):
     def test_test_is_fallback(self) -> None:
         self.assertEqual(select_commands(self.data({"test": "t"})), [("test", "t")])
 
+    def test_build_is_fallback(self) -> None:
+        self.assertEqual(select_commands(self.data({"build": "b"})), [("build", "b")])
+
     def test_no_commands(self) -> None:
         self.assertEqual(files(self.data({})), {})
 
     def test_files_and_scripts(self) -> None:
-        generated = files(self.data({"unit": "php vendor/bin/phpunit"}))
+        generated = files(self.data({"unit": "runner --unit"}))
         self.assertIn("tools/pre-commit.py", generated)
         self.assertIn("cmd", generated["tools/pre-commit.py"])
         self.assertIn("python3", generated["tools/hooks/pre-commit"])
 
     def test_split_command(self) -> None:
-        self.assertEqual(split_command("php vendor/bin/phpunit"), ["php", "vendor/bin/phpunit"])
+        self.assertEqual(split_command("runner --unit"), ["runner", "--unit"])
 
     def test_script_contains_arguments(self) -> None:
-        text = script([("unit", ["php", "vendor/bin/phpunit"])])
-        self.assertIn("'php'", text)
-        self.assertIn("vendor/bin/phpunit", text)
+        text = script([("unit", ["runner", "--unit"])])
+        self.assertIn("'runner'", text)
+        self.assertIn("--unit", text)
 
     def test_hook_checks_python(self) -> None:
         text = hook()

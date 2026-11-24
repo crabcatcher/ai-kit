@@ -57,8 +57,8 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(result[0].status, "unknown")
 
     def test_evidence_name(self) -> None:
-        result = answers([question("stack.runtime")], ["PHP"])
-        self.assertEqual(result[0].name, "PHP")
+        result = answers([question("stack.runtime")], ["Runtime"])
+        self.assertEqual(result[0].name, "Runtime")
         self.assertIs(result[0].value, ABSENT)
 
     def test_eof_aborts(self) -> None:

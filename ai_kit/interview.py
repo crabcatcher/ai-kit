@@ -24,7 +24,7 @@ MERGED_LIMIT = 15
 MAX_PROBE_BYTES = 2 * 1024 * 1024
 
 ANSWER_STATUSES = ("answered", "unknown")
-EXTRACT_KINDS = ("json", "toml", "regex")
+EXTRACT_KINDS = ("json", "toml", "regex", "none")
 EXTRACT_PATH = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
 DRIVE = re.compile(r"^[A-Za-z]:")
 
@@ -56,6 +56,7 @@ class Probe:
     extract: str
     name: str | None
     provenance: str = "probe"
+    version_required: bool = True
 
 
 @dataclass(frozen=True)
@@ -287,7 +288,7 @@ def parse_probes(entries: Any) -> list[Probe]:
         if not isinstance(entry, dict):
             errors.append((place, "ожидается объект"))
             continue
-        for key in sorted(set(entry) - {"id", "globs", "field", "extract", "name", "provenance"}):
+        for key in sorted(set(entry) - {"id", "globs", "field", "extract", "name", "provenance", "version"}):
             errors.append((f"{place}.{key}", "неизвестное поле"))
 
         probe_id = entry.get("id")
@@ -325,11 +326,21 @@ def parse_probes(entries: Any) -> list[Probe]:
         elif name is not None:
             errors.append((f"{place}.name", "имя допустимо только для поля-доказательства"))
 
+        version = entry.get("version", "probe")
+        if version not in ("probe", "none"):
+            errors.append((f"{place}.version", "ожидается probe или none"))
+        if version == "none" and not schema.is_evidence(node):
+            errors.append((f"{place}.version", "none допустим только для поля-доказательства"))
+
         extract = entry.get("extract")
+        if version == "none" and extract is None:
+            extract = "none"
         if not isinstance(extract, str) or not extract:
             errors.append((f"{place}.extract", "ожидается правило извлечения"))
         else:
             _validate_extract(extract, f"{place}.extract", errors)
+        if version == "none" and extract != "none":
+            errors.append((f"{place}.extract", "при version = none значение не извлекается"))
 
         if entry.get("provenance") != "probe":
             errors.append((f"{place}.provenance", "проба всегда даёт probe"))
@@ -342,6 +353,7 @@ def parse_probes(entries: Any) -> list[Probe]:
                     field=field_name,
                     extract=extract,
                     name=name if isinstance(name, str) else None,
+                    version_required=version != "none",
                 )
             )
 
@@ -361,9 +373,15 @@ def _glob_problem(glob: str) -> str | None:
 
 
 def _validate_extract(extract: str, path: str, errors: list[tuple[str, str]]) -> None:
+    if extract == "none":
+        return
     kind, separator, argument = extract.partition(":")
     if not separator or kind not in EXTRACT_KINDS:
         errors.append((path, f"ожидается одно из: {', '.join(EXTRACT_KINDS)}"))
+        return
+    if kind == "none":
+        if argument:
+            errors.append((path, "none не принимает аргумент"))
         return
     if not argument:
         errors.append((path, "правило извлечения пустое"))
@@ -407,10 +425,18 @@ def _run_probe(root: Path, probe: Probe) -> ProbeHit | ProbeMiss:
                 if path.stat().st_size > MAX_PROBE_BYTES:
                     reason = f"файл больше {MAX_PROBE_BYTES} байт"
                     continue
-                text = path.read_text(encoding="utf-8")
+                text = path.read_text(encoding="utf-8-sig")
             except (OSError, UnicodeDecodeError) as error:
                 reason = f"файл не читается: {error}"
                 continue
+            if not probe.version_required:
+                return ProbeHit(
+                    probe_id=probe.id,
+                    field=probe.field,
+                    name=probe.name,
+                    value=None,
+                    evidence=path.relative_to(root).as_posix(),
+                )
             value = _extract(probe.extract, text)
             if value is ABSENT:
                 reason = "значение не найдено"
@@ -469,14 +495,17 @@ def apply_probe_hits(values: dict[str, Any], hits: list[ProbeHit]) -> dict[str, 
             if (hit.field, hit.name) in facts:
                 raise InterviewError([(hit.field, f"две пробы на факт {hit.name}")])
             facts.add((hit.field, hit.name))
-            if isinstance(hit.value, bool) or not isinstance(hit.value, (str, int, float)):
+            if hit.value is not None and (
+                isinstance(hit.value, bool) or not isinstance(hit.value, (str, int, float))
+            ):
                 raise InterviewError([(hit.field, "версия должна быть строкой или числом")])
             entry = {
                 "name": hit.name,
-                "version": str(hit.value),
                 "evidence": hit.evidence,
                 "provenance": "probe",
             }
+            if hit.value is not None:
+                entry["version"] = str(hit.value)
             _upsert_evidence(result, hit.field, entry)
             continue
         if hit.field in filled:
@@ -717,6 +746,8 @@ def apply_answers(
                 raise InterviewError([(answer.slot, "для поля-доказательства нужно имя факта")])
             _append_evidence(result, answer.slot, {"name": answer.name, "provenance": "answer"})
             answered += 1
+            if answer.version == "none":
+                continue
             if answer.version:
                 question_text = f"Версия {answer.name} названа по памяти; подтвердите файлом-доказательством."
             else:

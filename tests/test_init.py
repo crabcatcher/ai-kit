@@ -165,7 +165,7 @@ class InitTests(unittest.TestCase):
         feature.write_text("# Вход\n", encoding="utf-8")
         (self.target / "baseline.toml").write_text(
             'schema_version = "1"\n\n'
-            '[[violation]]\nrule = "P1"\npath = "app/Legacy.php"\nreason = "старое"\n'
+            '[[violation]]\nrule = "P1"\npath = "src/Legacy"\nreason = "старое"\n'
             'owner = "владелец проекта"\ntrigger = "изменение участка"\n',
             encoding="utf-8",
         )
@@ -174,10 +174,12 @@ class InitTests(unittest.TestCase):
             self.request(refresh=True, profile=self.target / "profile.toml", adapter=ADAPTER)
         )
         self.assertIn("features/login.md", self.read(".project/FEATURES.md"))
-        self.assertIn("app/Legacy.php", self.read(".project/tech-debt.md"))
+        self.assertIn("src/Legacy", self.read(".project/tech-debt.md"))
         self.assertEqual(self.read("profile.toml"), profile_before)
         self.assertEqual(self.read("tools/pre-commit.py"), generator)
-        self.assertIn("README.md", report.overwritten)
+        self.assertIn(".project/FEATURES.md", report.overwritten)
+        self.assertIn(".project/tech-debt.md", report.overwritten)
+        self.assertNotIn("README.md", report.overwritten)
 
     def test_refresh_requires_profile(self) -> None:
         with self.assertRaises(InitError):

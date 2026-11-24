@@ -7,9 +7,9 @@ from ai_kit.detect import load, matches
 
 class DetectTests(unittest.TestCase):
     def test_fixture_shape(self) -> None:
-        patterns, errors = load({"detect": [{"glob": "composer.json"}]})
+        patterns, errors = load({"detect": [{"glob": "manifest.json"}]})
         self.assertEqual(errors, [])
-        self.assertEqual(patterns, ["composer.json"])
+        self.assertEqual(patterns, ["manifest.json"])
 
     def test_plain_string_allowed(self) -> None:
         patterns, errors = load({"detect": ["manifest.json"]})
@@ -27,9 +27,9 @@ class DetectTests(unittest.TestCase):
     def test_match_in_project(self) -> None:
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "composer.json").write_text("{}", encoding="utf-8")
-            self.assertTrue(matches(root, ["composer.json"]))
-            self.assertFalse(matches(root, ["package.json"]))
+            (root / "manifest.json").write_text("{}", encoding="utf-8")
+            self.assertTrue(matches(root, ["manifest.json"]))
+            self.assertFalse(matches(root, ["other.json"]))
 
 
 if __name__ == "__main__":

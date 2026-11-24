@@ -9,7 +9,7 @@ from ai_kit.baseline import BaselineError, TEMPLATE, load, parse, violation_erro
 def entry(**extra):
     data = {
         "rule": "A1",
-        "path": "app/Legacy/Foo.php",
+        "path": "src/Legacy/Foo",
         "reason": "принято при внедрении",
         "owner": "владелец проекта",
         "trigger": "изменение затронутого участка",

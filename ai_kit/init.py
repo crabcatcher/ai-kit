@@ -90,10 +90,10 @@ def generate(request: Request) -> Report:
 
     plan = _plan(request, data, parsed, adapter)
     profile_text = toml_writer.dumps(data)
+    artifacts = _artifacts(data, parsed, request)
     outputs = _render_all(plan, request)
     profile_path = _safe_path(request.target, request.write_profile, "профиль")
-    artifacts = _artifacts(data, parsed, request)
-    overwritten = _overwritten(request.target, [profile_path, *(path for path, _ in outputs)])
+    overwritten = _overwritten(request.target, [(profile_path, profile_text), *outputs, *artifacts])
 
     if request.ask and not request.yes:
         print(f"Профиль: {_display(request.target, profile_path)}")
@@ -142,8 +142,8 @@ def _refresh(request: Request) -> Report:
 
     plan = _plan(request, data, parsed, adapter)
     outputs = _render_all(plan, request)
-    profile_path = _safe_path(request.target, request.write_profile, "профиль")
-    overwritten = _overwritten(request.target, [path for path, _ in outputs])
+    profile_path = request.profile
+    overwritten = _overwritten(request.target, outputs)
     if not request.dry_run:
         _write_all(outputs)
     return Report(
@@ -188,8 +188,19 @@ def plan_baseline_path(request: Request) -> Path:
     return _safe_path(request.target, request.write_baseline, "baseline")
 
 
-def _overwritten(target: Path, paths: list[Path]) -> tuple[str, ...]:
-    return tuple(_display(target, path) for path in paths if path.exists())
+def _overwritten(target: Path, files: list[tuple[Path, str]]) -> tuple[str, ...]:
+    result: list[str] = []
+    for path, text in files:
+        if not path.exists():
+            continue
+        try:
+            current = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            result.append(_display(target, path))
+            continue
+        if current != text:
+            result.append(_display(target, path))
+    return tuple(result)
 
 
 def _artifacts(

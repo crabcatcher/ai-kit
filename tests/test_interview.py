@@ -192,6 +192,22 @@ class ProbeParsingTests(unittest.TestCase):
     def test_provenance_answer_rejected(self) -> None:
         self.assert_error([self.probe(provenance="answer")], "probes[0].provenance")
 
+    def test_presence_probe_allowed(self) -> None:
+        probes = parse_probes(
+            [
+                {
+                    "id": "store",
+                    "globs": ["stack.yml"],
+                    "field": "stack.stores",
+                    "name": "store",
+                    "version": "none",
+                    "provenance": "probe",
+                }
+            ]
+        )
+        self.assertFalse(probes[0].version_required)
+        self.assertEqual(probes[0].extract, "none")
+
     def test_duplicate_probe_id_rejected(self) -> None:
         self.assert_error([self.probe(), self.probe()], "probes[1].id")
 
@@ -245,6 +261,20 @@ class ProbeRunTests(unittest.TestCase):
         probe = Probe("runtime-version", ("manifest.json",), "stack.runtime", "json:runtime.version", "runtime")
         _, misses = run_probes(self.root, [probe])
         self.assertIn("больше", misses[0].reason)
+
+    def test_presence_probe_has_no_version(self) -> None:
+        self.write("stack.yml", "services: {}\n")
+        probe = Probe(
+            "store",
+            ("stack.yml",),
+            "stack.stores",
+            "none",
+            "store",
+            version_required=False,
+        )
+        hits, misses = run_probes(self.root, [probe])
+        self.assertEqual(misses, [])
+        self.assertIsNone(hits[0].value)
 
 
 class ProbeApplyTests(unittest.TestCase):
@@ -390,6 +420,14 @@ class AnswerTests(unittest.TestCase):
         item = question(id="runtime", slots=("stack.runtime",))
         _, unknowns, _ = apply_answers({}, [item], [item], [Answer("stack.runtime", name="runtime")])
         self.assertEqual(unknowns[0]["field"], "stack.runtime.version")
+
+    def test_evidence_answer_version_not_applicable(self) -> None:
+        item = question(id="stores", slots=("stack.stores",))
+        values, unknowns, _ = apply_answers(
+            {}, [item], [item], [Answer("stack.stores", name="store", version="none")]
+        )
+        self.assertEqual(unknowns, [])
+        self.assertNotIn("version", values["stack"]["stores"][0])
 
 
 class AnswerParsingTests(unittest.TestCase):

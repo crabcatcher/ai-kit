@@ -11,6 +11,9 @@
 
 У каждого объекта есть владелец. Доступ проверяется по владельцу, а не по идентификатору из запроса: чужой идентификатор не даёт прав.
 
+<!-- adapter:ownership:begin -->
+<!-- adapter:ownership:end -->
+
 ## Секреты
 
 {{#if security.secrets_policy}}Правило проекта: {{ security.secrets_policy }}{{/if}}

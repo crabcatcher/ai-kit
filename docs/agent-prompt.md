@@ -9,7 +9,7 @@
 | `<ПУТЬ_К_AI_KIT>` | каталог стартера на машине, где запускается агент; в документы не записывается |
 | проект | текущий каталог агента |
 
-В PowerShell переменная задаётся отдельно: `$env:PYTHONPATH = "<путь из таблицы>"`, затем те же команды `python -m ai_kit…`.
+Если стартер не установлен, установи его editable (`python -m pip install -e <путь из таблицы>`) или задай `PYTHONPATH` на этот каталог.
 
 Если промпт передан ссылкой на этот файл, путь к стартеру можно не подставлять: он выводится из расположения файла (`docs/` → двумя уровнями выше).
 
@@ -27,7 +27,7 @@
 
 Цель: довести документацию до состояния, когда она описывает этот проект, а не шаблон. Стек и назначение проекта неизвестны заранее — их надо доказать файлами или получить ответом. Ничего не выдумывать. В стек проекта входят язык, фреймворки, хранилища и инструменты. Операционная система, версия интерпретатора или агента, локальные пути и окружение машины — не стек проекта и в документы не попадают: проект переносимый.
 
-Все команды ai_kit ниже запускай с PYTHONPATH, указывающим на каталог стартера из строки «Стартер». В PowerShell задай `$env:PYTHONPATH` один раз; в POSIX — `export PYTHONPATH`.
+Все команды ниже — `ai-kit ...`. Если пакет не установлен, установи его editable или задай `PYTHONPATH` на каталог стартера.
 
 Сначала прочитай в стартере:
 - interview/agent-brief.md
@@ -50,22 +50,22 @@
 - base.toml — минимальный профиль: schema_version = "1" и docs (язык и каталог документов; язык ru, каталог `.ai` рекомендуется, `.project` — дефолт);
 - adapter.toml — адаптер под стек: detect, probes, commands, rules, gates, questions. Только то, что реально подтверждается файлами. Версии — только probe с evidence. Нет гейта — не выдумывай его.
 Проверь адаптер:
-  python -m ai_kit.interview --check --adapter .pilot/adapter.toml
+  ai-kit interview --check --adapter .pilot/adapter.toml
 
 4. Интервью.
 Получи машиночитаемый батч для себя:
-  python -m ai_kit.interview --plan --profile .pilot/base.toml --adapter .pilot/adapter.toml --json
+  ai-kit interview --plan --profile .pilot/base.toml --adapter .pilot/adapter.toml --json
 Человеческую анкету собери по `docs/question-style.md`: там формула, примеры и запрет на машинные поля. Не показывай мне JSON, слоты и типы. Ответы сохрани в .pilot/answers.json (или answers.toml).
 
 5. Генерация.
-  python -m ai_kit.init --profile .pilot/base.toml --adapter .pilot/adapter.toml --answers .pilot/answers.json --write-profile .pilot/profile.toml
+  ai-kit init --profile .pilot/base.toml --adapter .pilot/adapter.toml --answers .pilot/answers.json --write-profile .pilot/profile.toml
 Если профиль не собрался — покажи ошибку и чего не хватает, не подставляй догадки.
 
 6. Проверка и дозаполнение.
 Прочитай сгенерированный план документации (post-init.md) и иди по майлстоунам M0–M8:
 - заполняй adapter:-фрагменты по коду: слои и зависимости, решения, именование, окружение, области коммитов, доступы, границы агента, форму инцидента;
 - для каждого публичного входа создай файл функции в features и строку в карте функций;
-- после создания или изменения features и baseline обнови только сгенерированные фрагменты: `python -m ai_kit.init --refresh --profile .pilot/profile.toml --adapter .pilot/adapter.toml`. Профиль при этом не меняется;
+- после создания или изменения features и baseline обнови только сгенерированные фрагменты: `ai-kit init --refresh --profile .pilot/profile.toml --adapter .pilot/adapter.toml`. Профиль при этом не меняется;
 - добавь правила проекта P в rules профиля;
 - существующие нарушения — в baseline.toml с владельцем и триггером; новый код baseline не расширяет;
 - pre-commit включай только если я подтвердил; после включения поставь `git config core.hooksPath tools/hooks`; если хук не находит интерпретатор, задай `git config hooks.interpreter <путь>`;

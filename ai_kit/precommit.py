@@ -17,6 +17,8 @@ def select_commands(data: dict[str, Any]) -> list[tuple[str, str]]:
     roles = [role for role in ("unit", "lint") if commands.get(role)]
     if not roles and commands.get("test"):
         roles = ["test"]
+    if not roles and commands.get("build"):
+        roles = ["build"]
     return [(role, str(commands[role])) for role in roles]
 
 

@@ -27,6 +27,14 @@ class TomlIoTests(unittest.TestCase):
                 load(path)
             self.assertIn("missing.toml", str(raised.exception))
 
+    def test_invalid_utf8_names_path(self) -> None:
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "binary.toml"
+            path.write_bytes(b"\xff\xfe")
+            with self.assertRaises(TomlError) as raised:
+                load(path)
+            self.assertIn("binary.toml", str(raised.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

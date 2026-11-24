@@ -143,7 +143,7 @@ def _run_gate(gate: Gate, root: Path, baseline: Path) -> list[Diagnostic]:
 
     argv = _argv(gate, root, baseline)
     if argv is None:
-        return [Diagnostic("gate", "gap", gate.id, f"гейт {gate.id}: нет baseline.toml")]
+        return [Diagnostic("gate", "gap", gate.id, f"гейт {gate.id}: нет {baseline.name}")]
     try:
         completed = subprocess.run(
             argv,

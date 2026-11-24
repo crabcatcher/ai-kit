@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_kit import schema
-from ai_kit.args import UsageError, ensure_known
+from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.toml_io import TomlError, load as load_toml
 
@@ -528,7 +528,7 @@ def _normalize(lines: list[str]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     configure_console()
-    args = sys.argv[1:] if argv is None else argv
+    args = normalize(sys.argv[1:] if argv is None else argv)
     try:
         ensure_known(args, {"--check", "--render", "--profile", "--help"})
     except UsageError as error:

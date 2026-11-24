@@ -15,7 +15,7 @@ class TomlError(Exception):
 def load(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8-sig")
-    except OSError as error:
+    except (OSError, UnicodeDecodeError) as error:
         raise TomlError(f"{path}: файл не читается: {error}") from error
     return loads(text, str(path))
 

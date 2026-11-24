@@ -7,10 +7,20 @@ class UsageError(Exception):
     pass
 
 
+def normalize(args: list[str]) -> list[str]:
+    result: list[str] = []
+    for arg in args:
+        if arg == "-h":
+            result.append("--help")
+        elif arg.startswith("--") and "=" in arg:
+            name, value = arg.split("=", 1)
+            result.extend((name, value))
+        else:
+            result.append(arg)
+    return result
+
+
 def ensure_known(args: list[str], allowed: set[str]) -> None:
     for arg in args:
-        if not arg.startswith("--"):
-            continue
-        name = arg.split("=", 1)[0]
-        if name not in allowed:
-            raise UsageError(f"неизвестный параметр: {name}")
+        if arg.startswith("-") and arg not in allowed:
+            raise UsageError(f"неизвестный параметр: {arg}")

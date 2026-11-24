@@ -129,6 +129,25 @@ class DoctorTests(unittest.TestCase):
         report = self.doctor()
         self.assertIn("baseline", [item.code for item in report.diagnostics])
 
+    def test_custom_baseline_path_reported(self) -> None:
+        self.make()
+        (self.target / "custom-baseline.toml").write_text(
+            'schema_version = "1"\n\n'
+            '[[violation]]\nrule = "A404"\npath = "app/Legacy.php"\n'
+            'reason = "старое"\nowner = "владелец"\ntrigger = "—"\n',
+            encoding="utf-8",
+        )
+        report = run(
+            DoctorRequest(
+                root=self.target,
+                profile=self.target / "profile.toml",
+                adapter=None,
+                kit_root=ROOT,
+                baseline="custom-baseline.toml",
+            )
+        )
+        self.assertTrue(any("custom-baseline.toml" in item.path for item in report.diagnostics))
+
     def test_missing_precommit_reported(self) -> None:
         self.make()
         (self.target / "tools" / "pre-commit.py").unlink()

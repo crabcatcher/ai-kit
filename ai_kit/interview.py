@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from ai_kit import schema
-from ai_kit.args import UsageError, ensure_known
+from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
+from ai_kit.paths import KitRootError, kit_root
 from ai_kit.templates import COMMAND_ROLES
 from ai_kit.toml_io import TomlError, load as load_toml
 
@@ -519,7 +520,14 @@ def plan_batch(questions: list[Question], values: dict[str, Any]) -> list[Questi
 
 def load_answers(path: Path) -> list[Answer]:
     if path.suffix == ".json":
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as error:
+            raise InterviewError([(str(path), f"файл не читается: {error}")]) from error
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise InterviewError([(str(path), f"JSON не разбирается: {error}")]) from error
     else:
         data = load_toml(path)
     return parse_answers(data)
@@ -883,7 +891,7 @@ def _load_adapter(path: str) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     configure_console()
-    args = sys.argv[1:] if argv is None else argv
+    args = normalize(sys.argv[1:] if argv is None else argv)
     try:
         ensure_known(
             args,
@@ -892,10 +900,14 @@ def main(argv: list[str] | None = None) -> int:
     except UsageError as error:
         print(f"{error}\nИспользование: python -m ai_kit.interview --help", file=sys.stderr)
         return 2
-    kit_root = Path(__file__).resolve().parents[1]
     if "--help" in args:
         print(__doc__)
         return 0
+    try:
+        root = kit_root()
+    except KitRootError as error:
+        print(error, file=sys.stderr)
+        return 2
     project_option = _option(args, "--project")
     if project_option == "":
         print("--project требует путь", file=sys.stderr)
@@ -908,7 +920,7 @@ def main(argv: list[str] | None = None) -> int:
             print("--adapter требует путь", file=sys.stderr)
             return 2
         try:
-            universal = load_questions(kit_root / "interview" / "questions.toml")
+            universal = load_questions(root / "interview" / "questions.toml")
             adapter_questions: list[Question] = []
             adapter_probes: list[Probe] = []
             if adapter_path:
@@ -934,7 +946,7 @@ def main(argv: list[str] | None = None) -> int:
             values = load_toml(Path(profile_path))
             adapter_data = _load_adapter(adapter_path)
             values = apply_commands(values, adapter_data)
-            universal = load_questions(kit_root / "interview" / "questions.toml")
+            universal = load_questions(root / "interview" / "questions.toml")
             bank = merge_questions(universal, load_adapter_questions(adapter_data))
             prepared = prepare(values, project_root, load_probes(adapter_data), bank)
         except (OSError, TomlError, InterviewError) as error:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import os
 import re
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -13,8 +14,9 @@ from typing import Any
 
 from ai_kit import ask as prompt
 from ai_kit import baseline, detect, interview, precommit, profile, rules, templates, toml_writer
-from ai_kit.args import UsageError, ensure_known
+from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
+from ai_kit.paths import KitRootError, kit_root
 from ai_kit.toml_io import TomlError, load as load_toml
 
 DEFAULT_DOCS_DIR = ".project"
@@ -482,6 +484,8 @@ def _write_all(files: list[tuple[Path, str]]) -> None:
                 handle.write(text)
             staged.append((Path(temporary), path))
         for temporary, path in staged:
+            mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+            os.chmod(temporary, mode)
             os.replace(temporary, path)
             if path.name == "pre-commit" and path.parent.name == "hooks":
                 path.chmod(0o755)
@@ -511,7 +515,7 @@ def _option(args: list[str], name: str) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     configure_console()
-    args = sys.argv[1:] if argv is None else argv
+    args = normalize(sys.argv[1:] if argv is None else argv)
     try:
         ensure_known(
             args,
@@ -537,7 +541,7 @@ def main(argv: list[str] | None = None) -> int:
     if write_baseline is None:
         write_baseline = "baseline.toml"
     if profile_path == "" or adapter_path == "" or answers_path == "" or write_profile == "" or write_baseline == "":
-        print("после --profile, --adapter, --answers и --write-profile нужен путь", file=sys.stderr)
+        print("после --profile, --adapter, --answers, --write-profile и --write-baseline нужен путь", file=sys.stderr)
         return 2
     if not profile_path and not answers_path and "--ask" not in args:
         print("нужен --profile, --answers или --ask", file=sys.stderr)
@@ -549,9 +553,15 @@ def main(argv: list[str] | None = None) -> int:
         print("--refresh требует --profile", file=sys.stderr)
         return 2
 
+    try:
+        root = kit_root()
+    except KitRootError as error:
+        print(error, file=sys.stderr)
+        return 2
+
     request = Request(
         target=Path.cwd(),
-        kit_root=Path(__file__).resolve().parents[1],
+        kit_root=root,
         profile=Path(profile_path) if profile_path else None,
         adapter=Path(adapter_path) if adapter_path else None,
         answers=Path(answers_path) if answers_path else None,

@@ -13,6 +13,8 @@ ai-kit --help
 
 После установки команды работают из любого каталога. Альтернатива без установки — `PYTHONPATH` на каталог репозитория и `python -m ai_kit.<команда>`.
 
+Обычный `pip install .` не поддерживается: шаблоны, канон и банк вопросов лежат вне пакета. Нужна editable-установка `pip install -e .`; иначе генератор не найдёт ресурсы.
+
 ## Запуск агента
 
 Полный промпт: [docs/agent-prompt.md](./docs/agent-prompt.md).
@@ -74,6 +76,16 @@ python -m ai_kit.prompt
 | [ai_kit/gates.py](./ai_kit/gates.py) | доступность бинаря, версии, коды возврата |
 | [ai_kit/diagnostics.py](./ai_kit/diagnostics.py) | форма диагноза, отчёт, коды выхода |
 | [ai_kit/toml_writer.py](./ai_kit/toml_writer.py) | запись TOML стандартной библиотекой |
+| [ai_kit/toml_io.py](./ai_kit/toml_io.py) | чтение TOML: BOM, путь в ошибке |
+| [ai_kit/cli.py](./ai_kit/cli.py) | единая команда `ai-kit` и диспетчер |
+| [ai_kit/args.py](./ai_kit/args.py) | строгая проверка флагов и `--opt=value` |
+| [ai_kit/paths.py](./ai_kit/paths.py) | ресурсы и сообщение про editable-установку |
+| [tests/test_cli.py](./tests/test_cli.py) | неизвестные флаги и `--help` |
+| [tests/test_reliability.py](./tests/test_reliability.py) | атомарная запись, baseline, JSON-ошибки |
+| [tests/test_paths.py](./tests/test_paths.py) | отсутствие ресурсов установленного пакета |
+| [tests/test_toml_io.py](./tests/test_toml_io.py) | BOM и невалидный UTF-8 |
+| [tests/test_canon_sync.py](./tests/test_canon_sync.py) | синхронизация канона и реестра |
+| [tests/test_schema_consistency.py](./tests/test_schema_consistency.py) | известные расхождения схемы и валидатора |
 | [tests/test_interview.py](./tests/test_interview.py) | тесты вопросов, проб, ответов и отчёта |
 | [tests/test_init.py](./tests/test_init.py) | тесты генерации, сохранения фрагментов и профиля |
 | [tests/test_doctor.py](./tests/test_doctor.py) | тесты встроенных проверок и гейтов |

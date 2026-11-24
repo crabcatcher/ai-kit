@@ -9,7 +9,7 @@ from dataclasses import fields as dc_fields
 from pathlib import Path
 from typing import Any
 
-from ai_kit.args import UsageError, ensure_known
+from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.rules import LABELS, REQUIRED, Rule, build_rules, rule_errors
 from ai_kit.toml_io import TomlError, load as load_toml
@@ -553,32 +553,35 @@ def print_schema() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     configure_console()
-    args = sys.argv[1:] if argv is None else argv
+    args = normalize(sys.argv[1:] if argv is None else argv)
     try:
         ensure_known(args, {"--check", "--print-schema", "--help"})
     except UsageError as error:
         print(f"{error}\nИспользование: python -m ai_kit.profile --help", file=sys.stderr)
         return 2
-    if "--print-schema" in args:
-        print(print_schema())
-        return 0
     if "--help" in args:
         print(__doc__)
         return 0
+    if "--check" in args and "--print-schema" in args:
+        print("--check и --print-schema несовместимы", file=sys.stderr)
+        return 2
     if "--check" in args:
         index = args.index("--check")
-        if index + 1 >= len(args):
+        if index + 1 >= len(args) or args[index + 1].startswith("-"):
             print("--check требует путь к профилю", file=sys.stderr)
             return 2
         try:
             load(Path(args[index + 1]))
         except (OSError, TomlError) as error:
             print(f"не удалось прочитать профиль: {error}", file=sys.stderr)
-            return 2
+            return 1
         except ProfileError as error:
             print(error, file=sys.stderr)
             return 1
         print("Профиль валиден.")
+        return 0
+    if "--print-schema" in args:
+        print(print_schema())
         return 0
     print("Использование: python -m ai_kit.profile --print-schema | --check <путь>", file=sys.stderr)
     return 2

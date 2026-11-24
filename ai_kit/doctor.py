@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from ai_kit import baseline, detect, gates, precommit, profile, rules, templates
-from ai_kit.args import UsageError, ensure_known
+from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.diagnostics import Diagnostic, Report
+from ai_kit.paths import KitRootError, kit_root
 from ai_kit.toml_io import TomlError, load as load_toml
 
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
@@ -75,9 +76,11 @@ def run(request: DoctorRequest) -> Report:
     diagnostics.extend(_gate_coverage(gate_list, adapter_rules))
     if gate_list:
         if request.gates:
-            results = gates.run_gates(gate_list, request.root, request.root / request.baseline)
-            diagnostics.extend(results)
-            diagnostics.extend(_stub_registry_diagnostics(results, gate_list, adapter_rules))
+            baseline_path = _inside(request.root, request.baseline)
+            if baseline_path is not None:
+                results = gates.run_gates(gate_list, request.root, baseline_path)
+                diagnostics.extend(results)
+                diagnostics.extend(_stub_registry_diagnostics(results, gate_list, adapter_rules))
         else:
             diagnostics.append(
                 Diagnostic("gate", "warning", "gates", "внешние гейты не запускались: нет --gates")
@@ -274,14 +277,16 @@ def _rule_ids(
 
 def _baseline_diagnostics(request: DoctorRequest, rule_ids: set[str]) -> list[Diagnostic]:
     path = request.root / request.baseline
+    if _inside(request.root, request.baseline) is None:
+        return [Diagnostic("baseline", "error", request.baseline, "путь выходит за каталог проекта")]
     if not path.is_file():
         return []
     try:
         data = load_toml(path)
     except (OSError, TomlError) as error:
-        return [Diagnostic("baseline", "error", "baseline.toml", f"baseline не читается: {error}")]
+        return [Diagnostic("baseline", "error", request.baseline, f"baseline не читается: {error}")]
     return [
-        Diagnostic("baseline", "error", f"baseline.toml:{place}" if place else "baseline.toml", message)
+        Diagnostic("baseline", "error", f"{request.baseline}:{place}" if place else request.baseline, message)
         for place, message in baseline.violation_errors(data, rule_ids)
     ]
 
@@ -395,7 +400,7 @@ def _option(args: list[str], name: str) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     configure_console()
-    args = sys.argv[1:] if argv is None else argv
+    args = normalize(sys.argv[1:] if argv is None else argv)
     try:
         ensure_known(args, {"--profile", "--adapter", "--gates", "--json", "--baseline", "--help"})
     except UsageError as error:
@@ -409,15 +414,22 @@ def main(argv: list[str] | None = None) -> int:
     adapter_path = _option(args, "--adapter")
     if profile_path is None or profile_path == "" or adapter_path == "":
         print(
-            "Использование: python -m ai_kit.doctor --profile <путь> [--adapter <путь>] [--gates] [--json]",
+            "Использование: python -m ai_kit.doctor --profile <путь> [--adapter <путь>] [--gates] [--baseline <путь>] [--json]",
             file=sys.stderr,
         )
+        return 2
+
+    try:
+        root = kit_root()
+    except KitRootError as error:
+        print(error, file=sys.stderr)
         return 2
 
     request = DoctorRequest(
         root=Path.cwd(),
         profile=Path(profile_path),
         adapter=Path(adapter_path) if adapter_path else None,
+        kit_root=root,
         gates="--gates" in args,
         baseline=_option(args, "--baseline") or "baseline.toml",
     )

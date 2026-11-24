@@ -1,0 +1,15 @@
+{
+  "mutations": [
+    {
+      "replace": {
+        "path": ".project/tech-debt.md",
+        "old": "| layers | инструмент проверки ещё не выбран | владелец проекта | второй разработчик |\n",
+        "new": ""
+      }
+    }
+  ],
+  "expect": [
+    {"code": "registry", "severity": "error", "path": "tech-debt", "message": "layers"}
+  ],
+  "exit": 1
+}

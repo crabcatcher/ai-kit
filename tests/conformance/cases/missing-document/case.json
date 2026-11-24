@@ -1,0 +1,9 @@
+{
+  "mutations": [
+    {"delete": {"path": ".project/templates/plan.md"}}
+  ],
+  "expect": [
+    {"code": "document", "severity": "error", "path": "templates/plan.md"}
+  ],
+  "exit": 1
+}

@@ -1,0 +1,85 @@
+schema_version = "1"
+
+[project]
+name = "example"
+purpose = "Пример профиля: показывает форму, не описывает реальный проект."
+boundaries = [
+  "не описывает реальный проект",
+  "не содержит решений об архитектуре",
+]
+
+[docs]
+language = "ru"
+dir = ".project"
+
+[stack]
+runtime = [
+  { name = "example-runtime", version = "1.0", evidence = "manifest.json", provenance = "probe" },
+]
+frameworks = []
+stores = [
+  { name = "example-store", evidence = "config/store.toml", provenance = "probe" },
+]
+tools = []
+
+[layout]
+source_roots = ["src"]
+
+[[layout.layers]]
+name = "domain"
+responsibility = "правила предметной области"
+may_depend_on = []
+
+[[layout.layers]]
+name = "application"
+responsibility = "сценарии использования"
+may_depend_on = ["domain"]
+
+[[layout.layers]]
+name = "infrastructure"
+responsibility = "внешние системы и хранение"
+may_depend_on = ["domain", "application"]
+
+[tests]
+framework = "example-test-runner"
+
+[tests.commands]
+test = "run-tests"
+unit = "run-unit"
+e2e = "run-e2e"
+lint = "run-lint"
+build = "run-build"
+migrate = "run-migrate"
+
+[process]
+branches = "<type>/<short-name>"
+review_roles = ["reviewer", "plan-critic"]
+tiers = true
+
+[automation]
+clients = []
+ci = "example-ci"
+pre_commit = true
+
+[security]
+access_levels = ["public", "owner", "admin"]
+secrets_policy = "секреты только в окружении, не в репозитории"
+
+[[rules]]
+id = "P1"
+text = "Ветка называется по типу и сути задачи"
+label = "дисциплина"
+executor = "—"
+catcher = "ревьюер"
+owner = "владелец проекта"
+trigger = "—"
+
+[[gates.disabled]]
+id = "layers"
+reason = "инструмент проверки ещё не выбран"
+owner = "владелец проекта"
+trigger = "второй разработчик"
+
+[[unknowns]]
+field = "stack.stores[0].version"
+question = "Какая версия хранилища используется в production?"

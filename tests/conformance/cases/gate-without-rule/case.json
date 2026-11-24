@@ -1,0 +1,9 @@
+{
+  "adapter": "adapter.toml",
+  "gates": false,
+  "expect": [
+    {"code": "registry", "severity": "error", "path": "case-check", "message": "нет строки реестра"},
+    {"code": "gate", "severity": "warning", "path": "gates"}
+  ],
+  "exit": 1
+}

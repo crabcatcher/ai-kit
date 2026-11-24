@@ -1,0 +1,9 @@
+{
+  "mutations": [
+    {"append": {"path": ".project/patterns.md", "text": "\n{{ project.name }}\n"}}
+  ],
+  "expect": [
+    {"code": "placeholder", "severity": "error", "path": "patterns.md"}
+  ],
+  "exit": 1
+}

@@ -1,0 +1,9 @@
+{
+  "mutations": [
+    {"append": {"path": ".project/development.md", "text": "\n[битая](missing.md)\n"}}
+  ],
+  "expect": [
+    {"code": "link", "severity": "error", "path": "development.md", "message": "missing.md"}
+  ],
+  "exit": 1
+}

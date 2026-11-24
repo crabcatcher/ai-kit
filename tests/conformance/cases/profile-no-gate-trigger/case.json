@@ -1,0 +1,16 @@
+{
+  "mutations": [
+    {
+      "replace": {
+        "path": "profile.toml",
+        "old": "label = \"дисциплина\"",
+        "new": "label = \"нет гейта\""
+      }
+    }
+  ],
+  "expect": [
+    {"code": "profile", "severity": "error", "path": "rules[0].reason"},
+    {"code": "profile", "severity": "error", "path": "rules[0].trigger"}
+  ],
+  "exit": 1
+}

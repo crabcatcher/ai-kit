@@ -1,0 +1,8 @@
+{
+  "adapter": "adapter.toml",
+  "gates": true,
+  "expect": [
+    {"code": "gate", "severity": "gap", "path": "case-check", "message": "недоступен"}
+  ],
+  "exit": 0
+}

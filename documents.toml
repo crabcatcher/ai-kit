@@ -1,0 +1,99 @@
+# Манифест документов набора. Путь считается от корня репозитория.
+# {docs.dir} подставляется из профиля; других подстановок в путях нет.
+# id используется ссылками {{link:id}} в шаблонах.
+
+[[document]]
+id = "readme"
+template = "templates/README.md.tpl"
+path = "README.md"
+title = "Проект: обзор и проверки"
+
+[[document]]
+id = "agents"
+template = "templates/AGENTS.md.tpl"
+path = "AGENTS.md"
+title = "Правила для агента"
+
+[[document]]
+id = "docs-index"
+template = "templates/docs-index.md.tpl"
+path = "{docs.dir}/README.md"
+title = "Индекс документов"
+
+[[document]]
+id = "registry"
+template = "templates/registry.md.tpl"
+path = "{docs.dir}/registry.md"
+title = "Реестр правил"
+
+[[document]]
+id = "pipeline"
+template = "templates/pipeline.md.tpl"
+path = "{docs.dir}/pipeline.md"
+title = "Маршрут задачи"
+
+[[document]]
+id = "development"
+template = "templates/development.md.tpl"
+path = "{docs.dir}/development.md"
+title = "Разработка"
+
+[[document]]
+id = "architecture"
+template = "templates/architecture.md.tpl"
+path = "{docs.dir}/architecture.md"
+title = "Архитектура"
+
+[[document]]
+id = "patterns"
+template = "templates/patterns.md.tpl"
+path = "{docs.dir}/patterns.md"
+title = "Договорённости кода"
+
+[[document]]
+id = "security"
+template = "templates/security.md.tpl"
+path = "{docs.dir}/security.md"
+title = "Доступы и данные"
+
+[[document]]
+id = "review"
+template = "templates/review.md.tpl"
+path = "{docs.dir}/review.md"
+title = "Ревью"
+
+[[document]]
+id = "features-index"
+template = "templates/features-index.md.tpl"
+path = "{docs.dir}/FEATURES.md"
+title = "Карта функциональности"
+
+[[document]]
+id = "tech-debt"
+template = "templates/tech-debt.md.tpl"
+path = "{docs.dir}/tech-debt.md"
+title = "Технический долг"
+
+[[document]]
+id = "incidents"
+template = "templates/incidents.md.tpl"
+path = "{docs.dir}/incidents.md"
+title = "Журнал сбоев"
+
+[[document]]
+id = "plan"
+template = "templates/plan.md.tpl"
+path = "{docs.dir}/templates/plan.md"
+title = "Шаблон плана"
+
+[[document]]
+id = "review-report"
+template = "templates/review-report.md.tpl"
+path = "{docs.dir}/templates/review-report.md"
+title = "Шаблон отчёта ревью"
+
+[[document]]
+id = "feature"
+template = "templates/feature.md.tpl"
+path = "{docs.dir}/templates/feature.md"
+title = "Шаблон файла функции"

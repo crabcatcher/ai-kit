@@ -1,0 +1,53 @@
+# Фикстурный адаптер: вымышленный стек, проверяет форму контракта.
+id = "fixture"
+supported = ["1"]
+
+[[detect]]
+glob = "manifest.json"
+
+[[probes]]
+id = "runtime-version"
+globs = ["manifest.json"]
+field = "stack.runtime"
+name = "runtime"
+extract = "json:runtime.version"
+provenance = "probe"
+
+[[probes]]
+id = "framework-name"
+globs = ["manifest.json"]
+field = "stack.frameworks"
+name = "framework"
+extract = "json:framework"
+provenance = "probe"
+
+[[rules]]
+id = "A1"
+text = "Слои не импортируют в запрещённом направлении"
+label = "гейт"
+executor = "layer-check"
+catcher = "гейт"
+owner = "владелец проекта"
+trigger = "—"
+
+[[commands]]
+role = "test"
+command = "run-tests"
+
+[[gates]]
+id = "layers"
+invariant = "Слои не импортируют в запрещённом направлении"
+requires = { binary = "layer-check", version = ">=1.0" }
+command = ["layer-check", "--project", "{project}"]
+on_unavailable = "gap"
+
+[[docs_fragments]]
+target = "architecture.md"
+marker = "adapter:decisions"
+content = "| пример | проверка формы | сложность |"
+
+[[questions]]
+id = "disabled-gates"
+question = "Какие проверки стека отключены, почему и когда их включат?"
+slots = ["gates.disabled"]
+why = "отключённая проверка без владельца и триггера — тихий пропуск"

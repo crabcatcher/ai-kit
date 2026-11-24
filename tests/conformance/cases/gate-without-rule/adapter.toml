@@ -1,0 +1,5 @@
+[[gates]]
+id = "case-check"
+invariant = "Инвариант проверки"
+command = ["@PYTHON@", "-c", "pass"]
+on_unavailable = "gap"

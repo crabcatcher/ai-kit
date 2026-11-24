@@ -1,0 +1,15 @@
+[[rules]]
+id = "A1"
+text = "Инвариант проверки"
+label = "гейт"
+executor = "case-check"
+catcher = "гейт"
+owner = "владелец проекта"
+trigger = "—"
+
+[[gates]]
+id = "case-check"
+invariant = "Инвариант проверки"
+requires = { binary = "no-such-binary-xyz" }
+command = ["@PYTHON@", "-c", "pass"]
+on_unavailable = "gap"

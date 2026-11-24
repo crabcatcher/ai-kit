@@ -1,0 +1,17 @@
+# Слова, которых не должно быть в ядре: канон, шаблоны, универсальные вопросы.
+# Файл — данные для теста чистоты. Рантаймом не читается, в потребительских репозиториях не запускается.
+
+scope = ["canon", "templates", "interview"]
+
+terms = [
+  # фреймворки и платформы
+  "nestjs", "symfony", "laravel", "django", "flask", "fastapi", "spring boot", "ruby on rails",
+  # языки
+  "php", "python", "javascript", "typescript", "kotlin", "golang",
+  # хранилища и ORM
+  "typeorm", "doctrine", "prisma", "hibernate", "postgresql", "postgres", "mysql", "mongodb",
+  # тесты и статический анализ
+  "phpunit", "jest", "mocha", "pytest", "eslint", "phpstan", "deptrac",
+  # пакетные менеджеры и манифесты
+  "composer.json", "package.json", "pom.xml", "build.gradle", "go.mod", "cargo.toml", "npm run", "yarn", "pnpm",
+]

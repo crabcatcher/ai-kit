@@ -1,0 +1,9 @@
+{
+  "mutations": [
+    {"append": {"path": ".project/development.md", "text": "\n## Пусто\n"}}
+  ],
+  "expect": [
+    {"code": "section", "severity": "warning", "path": "development.md"}
+  ],
+  "exit": 0
+}

@@ -1,0 +1,9 @@
+{
+  "mutations": [
+    {"replace": {"path": ".project/registry.md", "old": "| K1 |", "new": "| Q1 |"}}
+  ],
+  "expect": [
+    {"code": "registry", "severity": "error", "path": "registry", "message": "K1"}
+  ],
+  "exit": 1
+}

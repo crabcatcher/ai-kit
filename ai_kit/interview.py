@@ -41,6 +41,8 @@ class Question:
     slots: tuple[str, ...]
     why: str
     source: str
+    example: str | None = None
+    hint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -137,7 +139,7 @@ def parse_questions(data: dict[str, Any], source: str) -> list[Question]:
         if not isinstance(entry, dict):
             errors.append((place, "ожидается объект"))
             continue
-        for key in sorted(set(entry) - {"id", "question", "slots", "why"}):
+        for key in sorted(set(entry) - {"id", "question", "slots", "why", "example", "hint"}):
             errors.append((f"{place}.{key}", "неизвестное поле"))
 
         fields: dict[str, str] = {}
@@ -146,6 +148,12 @@ def parse_questions(data: dict[str, Any], source: str) -> list[Question]:
             if not isinstance(value, str) or not value.strip():
                 errors.append((f"{place}.{key}", "ожидается непустая строка"))
             else:
+                fields[key] = value
+        for key in ("example", "hint"):
+            value = entry.get(key)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                errors.append((f"{place}.{key}", "ожидается непустая строка"))
+            elif isinstance(value, str):
                 fields[key] = value
 
         slots = entry.get("slots")
@@ -166,7 +174,7 @@ def parse_questions(data: dict[str, Any], source: str) -> list[Question]:
             own_slots.add(slot)
         seen_slots.update(own_slots)
 
-        if len(fields) != 3 or not slots:
+        if any(key not in fields for key in ("id", "question", "why")) or not slots:
             continue
         if fields["id"] in seen_ids:
             errors.append((f"{place}.id", "идентификатор повторяется"))
@@ -178,6 +186,8 @@ def parse_questions(data: dict[str, Any], source: str) -> list[Question]:
                 slots=tuple(slots),
                 why=fields["why"],
                 source=source,
+                example=fields.get("example"),
+                hint=fields.get("hint"),
             )
         )
 
@@ -556,6 +566,8 @@ def plan_payload(prepared: Prepared) -> dict[str, Any]:
                 "id": question.id,
                 "text": question.text,
                 "why": question.why,
+                "example": question.example,
+                "hint": question.hint,
                 "source": question.source,
                 "slots": [describe_slot(slot) for slot in question.slots],
             }

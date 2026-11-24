@@ -48,9 +48,9 @@
   python -m ai_kit.interview --check --adapter .pilot/adapter.toml
 
 4. Интервью.
-Получи машиночитаемый батч:
+Получи машиночитаемый батч для себя:
   python -m ai_kit.interview --plan --profile .pilot/base.toml --adapter .pilot/adapter.toml --json
-Задай мне одним сообщением только те вопросы, которые не закрыты пробами. Не спрашивай доказанное. Для каждого вопроса — слот, тип и зачем он нужен. Ответы сохрани в .pilot/answers.json (или answers.toml).
+Не показывай мне JSON, слоты и типы. Собери человеческую анкету по `docs/question-style.md`: 3–5 вопросов за сообщение, простыми словами, с примером и форматом ответа. Не спрашивай то, что доказано файлами: стек, команды, корни, роли, наличие CI — предложи вывод и попроси подтвердить. Архитектуру предлагай схемой, а не открытым вопросом. Если я не понял — переформулируй с примером. Ответы сохрани в .pilot/answers.json (или answers.toml).
 
 5. Генерация.
   python -m ai_kit.init --profile .pilot/base.toml --adapter .pilot/adapter.toml --answers .pilot/answers.json --write-profile .pilot/profile.toml

@@ -70,6 +70,9 @@ class QuestionParsingTests(unittest.TestCase):
         self.assertEqual(len(questions), UNIVERSAL_LIMIT)
         slots = [slot for item in questions for slot in item.slots]
         self.assertEqual(len(slots), len(set(slots)))
+        for item in questions:
+            self.assertTrue(item.example, f"{item.id}: нет example")
+            self.assertTrue(item.hint, f"{item.id}: нет hint")
 
     def test_unknown_field_rejected(self) -> None:
         self.assert_error([entry(default="unknown")], "question[0].default")
@@ -473,6 +476,8 @@ class PlanJsonTests(unittest.TestCase):
             slots=("stack.runtime", "tests.commands"),
             why="нужно",
             source="universal",
+            example="Пример ответа",
+            hint="Формат ответа",
         )
         return Prepared(values={}, questions=(item,), batch=(item,), hits=(), misses=())
 
@@ -483,6 +488,8 @@ class PlanJsonTests(unittest.TestCase):
         self.assertTrue(slots[0]["evidence"])
         self.assertEqual(slots[1]["type"], "object")
         self.assertEqual(slots[1]["additional"], "string")
+        self.assertEqual(payload["questions"][0]["example"], "Пример ответа")
+        self.assertEqual(payload["questions"][0]["hint"], "Формат ответа")
 
     def test_describe_unknown_slot(self) -> None:
         self.assertEqual(describe_slot("project.missing"), {"path": "project.missing", "type": "unknown"})

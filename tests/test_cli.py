@@ -3,13 +3,19 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from ai_kit import doctor, init, interview, profile, prompt, templates
+from ai_kit import cli, doctor, init, interview, profile, prompt, templates
 
 MODULES = (doctor, init, interview, profile, prompt, templates)
 
 
 class CliFlagTests(unittest.TestCase):
+    def test_cli_configures_console(self) -> None:
+        with patch("ai_kit.cli.configure_console") as configure, redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["--help"]), 0)
+        configure.assert_called_once_with()
+
     def test_unknown_flag_is_error(self) -> None:
         for module in MODULES:
             with self.subTest(module=module.__name__), redirect_stderr(io.StringIO()):

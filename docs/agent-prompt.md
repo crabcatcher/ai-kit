@@ -47,7 +47,7 @@
 
 3. Входы.
 Создай рабочий каталог .pilot и сразу добавь `.pilot/` в `.gitignore` проекта. Если `.gitignore` менять нельзя — в `.git/info/exclude`. Каталог не должен попасть в коммит.
-- base.toml — минимальный профиль: schema_version = "1" и docs (язык и каталог документов; по умолчанию язык ru, каталог .project);
+- base.toml — минимальный профиль: schema_version = "1" и docs (язык и каталог документов; язык ru, каталог `.ai` рекомендуется, `.project` — дефолт);
 - adapter.toml — адаптер под стек: detect, probes, commands, rules, gates, questions. Только то, что реально подтверждается файлами. Версии — только probe с evidence. Нет гейта — не выдумывай его.
 Проверь адаптер:
   python -m ai_kit.interview --check --adapter .pilot/adapter.toml

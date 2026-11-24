@@ -12,6 +12,7 @@ __all__ = [
     "interview",
     "precommit",
     "profile",
+    "prompt",
     "rules",
     "schema",
     "templates",

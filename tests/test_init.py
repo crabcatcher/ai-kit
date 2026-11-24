@@ -173,6 +173,15 @@ class InitTests(unittest.TestCase):
         with self.assertRaises(InitError):
             generate(self.request(refresh=True, profile=None))
 
+    def test_bad_baseline_is_init_error(self) -> None:
+        generate(self.request())
+        (self.target / "baseline.toml").write_text(
+            'schema_version = "1"\n[[violation]]\nrule = "P1"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(refresh=True, profile=self.target / "profile.toml", adapter=ADAPTER))
+
     def test_overwritten_files_are_reported(self) -> None:
         (self.target / "README.md").write_text("# Старый\n", encoding="utf-8")
         report = generate(self.request())

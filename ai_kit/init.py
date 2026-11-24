@@ -164,6 +164,10 @@ def _plan(
     adapter: dict[str, Any],
 ) -> Plan:
     documents = templates.load_documents(request.kit_root / "documents.toml", request.kit_root)
+    try:
+        items = baseline.load(plan_baseline_path(request))
+    except (baseline.BaselineError, OSError, tomllib.TOMLDecodeError) as error:
+        raise InitError(f"baseline не прочитан:\n{error}") from error
     return Plan(
         documents=documents,
         values=data,
@@ -173,7 +177,7 @@ def _plan(
             "adapter": _adapter_rules(adapter),
             "project": parsed.rules,
         },
-        baseline=baseline.load(plan_baseline_path(request)),
+        baseline=items,
         features=_feature_rows(request.target, data),
     )
 
@@ -473,6 +477,8 @@ def _safe_path(target: Path, relative: str, what: str) -> Path:
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8", newline="\n")
+    if path.name == "pre-commit" and path.parent.name == "hooks":
+        path.chmod(0o755)
 
 
 def _display(target: Path, path: Path) -> str:

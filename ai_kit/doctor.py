@@ -303,8 +303,8 @@ def _features_diagnostics(
     request: DoctorRequest,
     parsed: profile.Profile,
 ) -> list[Diagnostic]:
-    folder = request.root / parsed.docs.dir / "features"
-    if not folder.is_dir():
+    folder = _inside(request.root, f"{parsed.docs.dir}/features")
+    if folder is None or not folder.is_dir():
         return []
     text = _document_text(documents, request, parsed, "features-index")
     if text is None:
@@ -317,7 +317,8 @@ def _features_diagnostics(
         for match in FEATURE_LINK.finditer(line):
             relative = match.group(1)
             listed.add(relative)
-            if not (request.root / parsed.docs.dir / relative).is_file():
+            target = _inside(request.root, f"{parsed.docs.dir}/{relative}")
+            if target is None or not target.is_file():
                 diagnostics.append(
                     Diagnostic("features", "error", "FEATURES.md", f"файла функции нет: {relative}")
                 )

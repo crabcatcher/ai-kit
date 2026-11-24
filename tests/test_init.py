@@ -147,6 +147,37 @@ class InitTests(unittest.TestCase):
         generate(self.request())
         self.assertIn("| Вход | `features/login.md` |", self.read(".project/FEATURES.md"))
 
+    def test_refresh_updates_generated_fragments_only(self) -> None:
+        generate(self.request())
+        profile_before = self.read("profile.toml")
+        feature = self.target / ".project" / "features" / "login.md"
+        feature.parent.mkdir(parents=True)
+        feature.write_text("# Вход\n", encoding="utf-8")
+        (self.target / "baseline.toml").write_text(
+            'schema_version = "1"\n\n'
+            '[[violation]]\nrule = "P1"\npath = "app/Legacy.php"\nreason = "старое"\n'
+            'owner = "владелец проекта"\ntrigger = "изменение участка"\n',
+            encoding="utf-8",
+        )
+        generator = self.read("tools/pre-commit.py")
+        report = generate(
+            self.request(refresh=True, profile=self.target / "profile.toml", adapter=ADAPTER)
+        )
+        self.assertIn("features/login.md", self.read(".project/FEATURES.md"))
+        self.assertIn("app/Legacy.php", self.read(".project/tech-debt.md"))
+        self.assertEqual(self.read("profile.toml"), profile_before)
+        self.assertEqual(self.read("tools/pre-commit.py"), generator)
+        self.assertIn("README.md", report.overwritten)
+
+    def test_refresh_requires_profile(self) -> None:
+        with self.assertRaises(InitError):
+            generate(self.request(refresh=True, profile=None))
+
+    def test_overwritten_files_are_reported(self) -> None:
+        (self.target / "README.md").write_text("# Старый\n", encoding="utf-8")
+        report = generate(self.request())
+        self.assertIn("README.md", report.overwritten)
+
     def test_scratch_project_from_answers(self) -> None:
         answers = self.target / "answers.toml"
         answers.write_text(ANSWERS, encoding="utf-8")

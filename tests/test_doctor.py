@@ -81,7 +81,7 @@ class DoctorTests(unittest.TestCase):
         self.make(FIXTURE)
         report = self.doctor(FIXTURE)
         self.assertTrue(report.ok)
-        gate = [item for item in report.diagnostics if item.code == "gate"]
+        gate = [item for item in report.diagnostics if item.code == "gate" and item.path == "gates"]
         self.assertEqual(gate[0].severity, "warning")
 
     def test_broken_link_reported(self) -> None:
@@ -143,6 +143,22 @@ class DoctorTests(unittest.TestCase):
         report = self.doctor()
         self.assertIn("features", [item.code for item in report.diagnostics])
 
+    def test_disabled_gate_is_gap(self) -> None:
+        self.make()
+        report = self.doctor()
+        gaps = [item for item in report.diagnostics if item.severity == "gap" and item.path == "layers"]
+        self.assertEqual(len(gaps), 1)
+
+    def test_declared_adapter_gap(self) -> None:
+        adapter = self.write_adapter(
+            '[[gaps]]\nid = "manual-sign"\nreason = "нет автоматической проверки"\n'
+            'owner = "владелец проекта"\ntrigger = "появление проверки подписи"\n'
+        )
+        self.make(adapter)
+        report = self.doctor(adapter)
+        gaps = [item for item in report.diagnostics if item.severity == "gap" and item.path == "manual-sign"]
+        self.assertEqual(len(gaps), 1)
+
     def test_stale_registry_reported(self) -> None:
         self.make()
         path = self.target / ".project" / "registry.md"
@@ -186,7 +202,7 @@ class DoctorTests(unittest.TestCase):
         adapter = self.write_adapter(gate_adapter(binary='"no-such-binary-xyz"'))
         self.make(adapter)
         report = self.doctor(adapter, gates=True)
-        gaps = [item for item in report.diagnostics if item.severity == "gap"]
+        gaps = [item for item in report.diagnostics if item.severity == "gap" and item.path == "case-check"]
         self.assertEqual(len(gaps), 1)
         self.assertIn("недоступен", gaps[0].message)
 

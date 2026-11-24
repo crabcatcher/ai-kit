@@ -32,7 +32,13 @@ class PrecommitTests(unittest.TestCase):
         self.assertIn("vendor/bin/phpunit", text)
 
     def test_hook_checks_python(self) -> None:
-        self.assertIn("py -3", hook())
+        text = hook()
+        self.assertIn("py -3", text)
+        self.assertIn("hooks.interpreter", text)
+        self.assertIn("AI_KIT_PYTHON", text)
+
+    def test_script_sets_utf8(self) -> None:
+        self.assertIn("reconfigure", script([("unit", ["run"])]))
 
 
 if __name__ == "__main__":

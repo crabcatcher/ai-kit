@@ -65,6 +65,8 @@ def run(request: DoctorRequest) -> Report:
     diagnostics.extend(_registry_diagnostics(documents, request, parsed, adapter_rules))
     diagnostics.extend(_baseline_diagnostics(request, _rule_ids(request, adapter_rules, parsed)))
     diagnostics.extend(_precommit_diagnostics(request, parsed))
+    diagnostics.extend(_disabled_gaps(parsed))
+    diagnostics.extend(_declared_gaps(adapter or {}))
 
     gate_list, gate_diagnostics = gates.load_gates(adapter or {})
     diagnostics.extend(gate_diagnostics)
@@ -325,6 +327,35 @@ def _features_diagnostics(
             diagnostics.append(
                 Diagnostic("features", "error", "FEATURES.md", f"функция не внесена в карту: {relative}")
             )
+    return diagnostics
+
+
+def _disabled_gaps(parsed: profile.Profile) -> list[Diagnostic]:
+    return [
+        Diagnostic("gate", "gap", gate.id, f"гейт отключён: {gate.reason}")
+        for gate in parsed.gates
+    ]
+
+
+def _declared_gaps(adapter: dict[str, Any]) -> list[Diagnostic]:
+    entries = adapter.get("gaps", [])
+    if not isinstance(entries, list):
+        return [Diagnostic("adapter", "error", "gaps", "ожидается список пробелов")]
+    diagnostics: list[Diagnostic] = []
+    for index, entry in enumerate(entries):
+        place = f"gaps[{index}]"
+        if not isinstance(entry, dict):
+            diagnostics.append(Diagnostic("adapter", "error", place, "ожидается объект"))
+            continue
+        extra = set(entry) - {"id", "reason", "owner", "trigger"}
+        for key in sorted(extra):
+            diagnostics.append(Diagnostic("adapter", "error", f"{place}.{key}", "неизвестное поле"))
+        for key in ("id", "reason", "owner", "trigger"):
+            value = entry.get(key)
+            if not isinstance(value, str) or not value.strip():
+                diagnostics.append(Diagnostic("adapter", "error", f"{place}.{key}", "ожидается непустая строка"))
+        if all(isinstance(entry.get(key), str) and entry.get(key).strip() for key in ("id", "reason", "owner", "trigger")):
+            diagnostics.append(Diagnostic("gate", "gap", entry["id"], f"заявленный пробел: {entry['reason']}"))
     return diagnostics
 
 

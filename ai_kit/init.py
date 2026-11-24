@@ -41,6 +41,7 @@ class Request:
     dry_run: bool = False
     ask: bool = False
     yes: bool = False
+    refresh: bool = False
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class Report:
     cancelled: bool = False
     baseline: str | None = None
     precommit: tuple[str, ...] = ()
+    overwritten: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,7 +67,9 @@ class Plan:
 
 
 def generate(request: Request) -> Report:
-    documents = templates.load_documents(request.kit_root / "documents.toml", request.kit_root)
+    if request.refresh:
+        return _refresh(request)
+
     values = _load_toml(request.profile) if request.profile else {}
     adapter = _load_toml(request.adapter) if request.adapter else {}
     _detect_preflight(adapter)
@@ -78,33 +82,20 @@ def generate(request: Request) -> Report:
     except profile.ProfileError as error:
         raise InitError(f"профиль не собран:\n{error}") from error
 
-    canon = _canon_rules(request.kit_root)
-    adapter_rules = _adapter_rules(adapter)
-    baseline_path = _safe_path(request.target, request.write_baseline, "baseline")
-    baseline_items = baseline.load(baseline_path)
-    plan = Plan(
-        documents=documents,
-        values=data,
-        fragments=_index_adapter_fragments(documents, data, adapter),
-        generated={
-            "canon": canon,
-            "adapter": adapter_rules,
-            "project": parsed.rules,
-        },
-        baseline=baseline_items,
-        features=_feature_rows(request.target, data),
-    )
-
+    plan = _plan(request, data, parsed, adapter)
     profile_text = toml_writer.dumps(data)
     outputs = _render_all(plan, request)
     profile_path = _safe_path(request.target, request.write_profile, "профиль")
     artifacts = _artifacts(data, parsed, request)
+    overwritten = _overwritten(request.target, [profile_path, *(path for path, _ in outputs)])
 
     if request.ask and not request.yes:
         print(f"Профиль: {_display(request.target, profile_path)}")
         print(f"Документов: {len(outputs)}")
         if artifacts:
             print(f"Артефактов: {len(artifacts)}")
+        if overwritten:
+            print(f"Перезаписано: {', '.join(overwritten)}")
         if not prompt.confirm():
             return Report(
                 profile=_display(request.target, profile_path),
@@ -112,8 +103,9 @@ def generate(request: Request) -> Report:
                 unknowns=len(data.get("unknowns", [])),
                 dry_run=True,
                 cancelled=True,
-                baseline=_display(request.target, baseline_path) if baseline_path.exists() else None,
+                baseline=_display(request.target, plan_baseline_path(request)) if plan_baseline_path(request).exists() else None,
                 precommit=tuple(_display(request.target, path) for path, _ in artifacts if "pre-commit" in path.name),
+                overwritten=overwritten,
             )
 
     if not request.dry_run:
@@ -128,11 +120,70 @@ def generate(request: Request) -> Report:
         documents=tuple(_display(request.target, path) for path, _ in outputs),
         unknowns=len(data.get("unknowns", [])),
         dry_run=request.dry_run,
-        baseline=_display(request.target, baseline_path)
-        if baseline_path.exists() or any(path == baseline_path for path, _ in artifacts)
+        baseline=_display(request.target, plan_baseline_path(request))
+        if plan_baseline_path(request).exists() or any(path == plan_baseline_path(request) for path, _ in artifacts)
         else None,
         precommit=tuple(_display(request.target, path) for path, _ in artifacts if "pre-commit" in path.name),
+        overwritten=overwritten,
     )
+
+
+def _refresh(request: Request) -> Report:
+    if not request.profile:
+        raise InitError("--refresh требует --profile: профиль не создаётся заново")
+    data = copy.deepcopy(_load_toml(request.profile))
+    adapter = _load_toml(request.adapter) if request.adapter else {}
+    try:
+        parsed = profile.parse(data)
+    except profile.ProfileError as error:
+        raise InitError(f"профиль не прошёл проверку:\n{error}") from error
+
+    plan = _plan(request, data, parsed, adapter)
+    outputs = _render_all(plan, request)
+    profile_path = _safe_path(request.target, request.write_profile, "профиль")
+    overwritten = _overwritten(request.target, [path for path, _ in outputs])
+    if not request.dry_run:
+        for path, text in outputs:
+            _write(path, text)
+    return Report(
+        profile=_display(request.target, profile_path),
+        documents=tuple(_display(request.target, path) for path, _ in outputs),
+        unknowns=len(data.get("unknowns", [])),
+        dry_run=request.dry_run,
+        baseline=_display(request.target, plan_baseline_path(request))
+        if plan_baseline_path(request).exists()
+        else None,
+        overwritten=overwritten,
+    )
+
+
+def _plan(
+    request: Request,
+    data: dict[str, Any],
+    parsed: profile.Profile,
+    adapter: dict[str, Any],
+) -> Plan:
+    documents = templates.load_documents(request.kit_root / "documents.toml", request.kit_root)
+    return Plan(
+        documents=documents,
+        values=data,
+        fragments=_index_adapter_fragments(documents, data, adapter),
+        generated={
+            "canon": _canon_rules(request.kit_root),
+            "adapter": _adapter_rules(adapter),
+            "project": parsed.rules,
+        },
+        baseline=baseline.load(plan_baseline_path(request)),
+        features=_feature_rows(request.target, data),
+    )
+
+
+def plan_baseline_path(request: Request) -> Path:
+    return _safe_path(request.target, request.write_baseline, "baseline")
+
+
+def _overwritten(target: Path, paths: list[Path]) -> tuple[str, ...]:
+    return tuple(_display(target, path) for path in paths if path.exists())
 
 
 def _artifacts(
@@ -462,6 +513,12 @@ def main(argv: list[str] | None = None) -> int:
     if not profile_path and not answers_path and "--ask" not in args:
         print("нужен --profile, --answers или --ask", file=sys.stderr)
         return 2
+    if "--refresh" in args and (answers_path or "--ask" in args):
+        print("--refresh несовместим с --answers и --ask", file=sys.stderr)
+        return 2
+    if "--refresh" in args and not profile_path:
+        print("--refresh требует --profile", file=sys.stderr)
+        return 2
 
     request = Request(
         target=Path.cwd(),
@@ -473,6 +530,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run="--dry-run" in args,
         ask="--ask" in args,
         yes="--yes" in args,
+        refresh="--refresh" in args,
     )
     try:
         report = generate(request)
@@ -491,6 +549,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Профиль: {report.profile}")
     print(f"Документов: {len(report.documents)}")
     print(f"Неизвестных: {report.unknowns}")
+    if report.overwritten:
+        print(f"Перезаписано: {', '.join(report.overwritten)}")
     if report.cancelled:
         print("Запись отменена.")
     elif report.dry_run:

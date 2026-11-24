@@ -13,8 +13,7 @@
 
 1. прочитать [README.md](./README.md); шаблоны — [docs/templates.md](./docs/templates.md), вопросы и пробы — [docs/interview.md](./docs/interview.md), генерация — [docs/generator.md](./docs/generator.md), проверки — [docs/doctor.md](./docs/doctor.md);
 2. свериться с каноном: [canon/canon.md](./canon/canon.md);
-3. для новой проверки — [docs/adapter-contract.md](./docs/adapter-contract.md);
-4. шаги и их границы — [docs/roadmap.md](./docs/roadmap.md).
+3. для новой проверки — [docs/adapter-contract.md](./docs/adapter-contract.md).
 
 ## Проверки
 

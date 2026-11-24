@@ -8,6 +8,7 @@ import re
 import sys
 import tomllib
 from dataclasses import dataclass
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ MERGED_LIMIT = 15
 MAX_PROBE_BYTES = 2 * 1024 * 1024
 
 ANSWER_STATUSES = ("answered", "unknown", "not_applicable")
-EXTRACT_KINDS = ("json", "toml", "regex", "none")
+EXTRACT_KINDS = ("json", "toml", "regex", "json-keys", "toml-keys", "none")
 EXTRACT_PATH = re.compile(r"^[A-Za-z0-9_@/-]+(?:\.[A-Za-z0-9_@/-]+|\\\.[A-Za-z0-9_@/-]+)*$")
 DRIVE = re.compile(r"^[A-Za-z]:")
 
@@ -295,6 +296,7 @@ def parse_probes(entries: Any) -> list[Probe]:
     errors: list[tuple[str, str]] = []
     probes: list[Probe] = []
     seen_ids: set[str] = set()
+    keys_fields: set[str] = set()
     for index, entry in enumerate(entries):
         place = f"probes[{index}]"
         if not isinstance(entry, dict):
@@ -332,12 +334,6 @@ def parse_probes(entries: Any) -> list[Probe]:
                 errors.append((f"{place}.field", "поля нет в схеме профиля"))
 
         name = entry.get("name")
-        if schema.is_evidence(node):
-            if not isinstance(name, str) or not name.strip():
-                errors.append((f"{place}.name", "для поля-доказательства нужно имя факта"))
-        elif name is not None:
-            errors.append((f"{place}.name", "имя допустимо только для поля-доказательства"))
-
         version = entry.get("version", "probe")
         if version not in ("probe", "none"):
             errors.append((f"{place}.version", "ожидается probe или none"))
@@ -351,6 +347,22 @@ def parse_probes(entries: Any) -> list[Probe]:
             errors.append((f"{place}.extract", "ожидается правило извлечения"))
         else:
             _validate_extract(extract, f"{place}.extract", errors)
+
+        keys = isinstance(extract, str) and extract.split(":", 1)[0] in ("json-keys", "toml-keys")
+        if schema.is_evidence(node):
+            if keys:
+                if name is not None:
+                    errors.append((f"{place}.name", "для keys имя берётся из ключей, name запрещён"))
+                if field_name in keys_fields:
+                    errors.append((f"{place}.field", "для поля уже есть keys-проба: допустима одна"))
+                else:
+                    keys_fields.add(field_name)
+            elif not isinstance(name, str) or not name.strip():
+                errors.append((f"{place}.name", "для поля-доказательства нужно имя факта"))
+        elif keys:
+            errors.append((f"{place}.extract", "keys допустим только для поля-доказательства"))
+        elif name is not None:
+            errors.append((f"{place}.name", "имя допустимо только для поля-доказательства"))
 
         if extract == "none" and version != "none":
             errors.append((f"{place}.extract", "none допустим только при version = none"))
@@ -403,7 +415,7 @@ def _validate_extract(extract: str, path: str, errors: list[tuple[str, str]]) ->
             re.compile(argument)
         except re.error as error:
             errors.append((path, f"регулярное выражение не разбирается: {error}"))
-    elif EXTRACT_PATH.fullmatch(argument) is None:
+    elif kind in ("json", "toml", "json-keys", "toml-keys") and EXTRACT_PATH.fullmatch(argument) is None:
         errors.append(
             (
                 path,
@@ -413,19 +425,53 @@ def _validate_extract(extract: str, path: str, errors: list[tuple[str, str]]) ->
         )
 
 
+def _is_keys(extract: str) -> bool:
+    return extract.split(":", 1)[0] in ("json-keys", "toml-keys")
+
+
+def _keys_value(extract: str, text: str) -> tuple[dict[str, Any] | None, str]:
+    kind, _, argument = extract.partition(":")
+    try:
+        data = json.loads(text) if kind == "json-keys" else tomllib.loads(text)
+    except (json.JSONDecodeError, tomllib.TOMLDecodeError):
+        return None, "файл не разбирается"
+    node: Any = data
+    for part in _path_parts(argument):
+        if isinstance(node, list) and part.isdigit() and int(part) < len(node):
+            node = node[int(part)]
+        elif isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return None, "путь не найден"
+    if not isinstance(node, dict):
+        return None, "по пути не объект"
+    if not node:
+        return None, "объект пуст"
+    return node, ""
+
+
+def _version_value(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (str, int, float, date, time, datetime)):
+        text = str(value).strip()
+        return text or None
+    return None
+
+
 def run_probes(root: Path, probes: list[Probe]) -> tuple[list[ProbeHit], list[ProbeMiss]]:
     hits: list[ProbeHit] = []
     misses: list[ProbeMiss] = []
     for probe in probes:
         result = _run_probe(root, probe)
-        if isinstance(result, ProbeHit):
-            hits.append(result)
-        else:
+        if isinstance(result, ProbeMiss):
             misses.append(result)
+        else:
+            hits.extend(result)
     return hits, misses
 
 
-def _run_probe(root: Path, probe: Probe) -> ProbeHit | ProbeMiss:
+def _run_probe(root: Path, probe: Probe) -> list[ProbeHit] | ProbeMiss:
     reason = "файлы не найдены"
     for pattern in probe.globs:
         try:
@@ -447,28 +493,56 @@ def _run_probe(root: Path, probe: Probe) -> ProbeHit | ProbeMiss:
             except (OSError, UnicodeDecodeError) as error:
                 reason = f"файл не читается: {error}"
                 continue
+            evidence = path.relative_to(root).as_posix()
+            if _is_keys(probe.extract):
+                data, miss_reason = _keys_value(probe.extract, text)
+                if data is None:
+                    reason = miss_reason
+                    continue
+                result = []
+                for name in sorted(data):
+                    if not name:
+                        continue
+                    value = _version_value(data[name]) if probe.version_required else None
+                    result.append(
+                        ProbeHit(
+                            probe_id=probe.id,
+                            field=probe.field,
+                            name=name,
+                            value=value,
+                            evidence=evidence,
+                        )
+                    )
+                if result:
+                    return result
+                reason = "ключей нет"
+                continue
             if not probe.version_required:
                 if probe.extract != "none" and _extract(probe.extract, text) is ABSENT:
                     reason = "значение не найдено"
                     continue
-                return ProbeHit(
-                    probe_id=probe.id,
-                    field=probe.field,
-                    name=probe.name,
-                    value=None,
-                    evidence=path.relative_to(root).as_posix(),
-                )
+                return [
+                    ProbeHit(
+                        probe_id=probe.id,
+                        field=probe.field,
+                        name=probe.name,
+                        value=None,
+                        evidence=evidence,
+                    )
+                ]
             value = _extract(probe.extract, text)
             if value is ABSENT:
                 reason = "значение не найдено"
                 continue
-            return ProbeHit(
-                probe_id=probe.id,
-                field=probe.field,
-                name=probe.name,
-                value=value,
-                evidence=path.relative_to(root).as_posix(),
-            )
+            return [
+                ProbeHit(
+                    probe_id=probe.id,
+                    field=probe.field,
+                    name=probe.name,
+                    value=value,
+                    evidence=evidence,
+                )
+            ]
     return ProbeMiss(probe.id, probe.field, reason)
 
 
@@ -488,7 +562,10 @@ def _extract(extract: str, text: str) -> Any:
             return ABSENT
         return match.group(1) if match.groups() else match.group(0)
     try:
-        data = json.loads(text) if kind == "json" else tomllib.loads(text)
+        if kind == "json":
+            data = json.loads(text)
+        else:
+            data = tomllib.loads(text)
     except (json.JSONDecodeError, tomllib.TOMLDecodeError):
         return ABSENT
     node: Any = data
@@ -1131,7 +1208,7 @@ def main(argv: list[str] | None = None) -> int:
             if "--json" in args:
                 print(plan_json(prepared))
                 return 0
-            print(f"Пробы: найдено {len(prepared.hits)}, не найдено {len(prepared.misses)}.")
+            print(f"Пробы: фактов найдено {len(prepared.hits)}, проб без результата {len(prepared.misses)}.")
             for index, question in enumerate(prepared.batch, start=1):
                 print(f"{index}. {question.text}")
             return 0

@@ -97,6 +97,7 @@ python -m ai_kit.prompt
 | [ai_kit/interview.py](./ai_kit/interview.py) | банк и дедупликация, пробы, ответы, неизвестное, отчёт, JSON-план |
 | [ai_kit/ask.py](./ai_kit/ask.py) | консольный опрос по слотам и подтверждение записи |
 | [ai_kit/init.py](./ai_kit/init.py) | генератор: профиль, документы, фрагменты, правила |
+| [ai_kit/inputs.py](./ai_kit/inputs.py) | публичные входы: форма, канонизация и перенос в профиль |
 | [ai_kit/rules.py](./ai_kit/rules.py) | строки реестра, метки, загрузка канона |
 | [ai_kit/baseline.py](./ai_kit/baseline.py) | принятые нарушения правил: формат и проверки |
 | [ai_kit/precommit.py](./ai_kit/precommit.py) | скрипт и хук проверки перед коммитом |
@@ -116,6 +117,7 @@ python -m ai_kit.prompt
 | [tests/test_schema_consistency.py](./tests/test_schema_consistency.py) | известные расхождения схемы и валидатора |
 | [tests/test_interview.py](./tests/test_interview.py) | тесты вопросов, проб, ответов и отчёта |
 | [tests/test_init.py](./tests/test_init.py) | тесты генерации, сохранения фрагментов и профиля |
+| [tests/test_inputs.py](./tests/test_inputs.py) | форма входов, канонизация и перенос в профиль |
 | [tests/test_doctor.py](./tests/test_doctor.py) | тесты встроенных проверок и гейтов |
 | [tests/conformance/](./tests/conformance) | корпус фикстур: дефект и ожидаемый диагноз |
 | [templates/](./templates) | 17 шаблонов документов: архитектура, реестр, маршрут, функции, долг, план дозаполнения |

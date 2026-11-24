@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_kit import ask as prompt
-from ai_kit import baseline, detect, interview, precommit, profile, rules, templates, toml_writer
+from ai_kit import baseline, detect, inputs, interview, precommit, profile, rules, templates, toml_writer
 from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.paths import KitRootError, kit_root
@@ -24,7 +24,7 @@ DEFAULT_LANGUAGE = "ru"
 DEFAULT_SCHEMA = "1"
 NO_VALUE = "—"
 PROFILE_ORDER = (
-    "schema_version", "project", "docs", "stack", "layout", "tests",
+    "schema_version", "project", "docs", "stack", "layout", "inputs", "tests",
     "process", "automation", "security", "rules", "gates", "unknowns",
     "not_applicable", "adapter",
 )
@@ -81,6 +81,10 @@ def generate(request: Request) -> Report:
     adapter = _load_toml(request.adapter) if request.adapter else {}
     _detect_preflight(adapter)
     values = interview.apply_commands(values, adapter)
+    try:
+        values = inputs.apply(values, adapter)
+    except inputs.InputError as error:
+        raise InitError(str(error)) from error
 
     result = _run_interview(values, adapter, request)
     data = _build_profile(result.values, result.unknowns, adapter.get("id"))

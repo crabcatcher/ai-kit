@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ai_kit import baseline, detect, gates, precommit, profile, rules, templates
+from ai_kit import baseline, detect, gates, inputs, precommit, profile, rules, templates
 from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.diagnostics import Diagnostic, Report
@@ -67,6 +67,7 @@ def run(request: DoctorRequest) -> Report:
     diagnostics.extend(_document_diagnostics(documents, raw, request))
     diagnostics.extend(_unknowns_diagnostics(documents, raw, request))
     diagnostics.extend(_features_diagnostics(documents, request, parsed))
+    diagnostics.extend(_inputs_diagnostics(parsed, request))
     adapter_rules, rule_diagnostics = _adapter_rules(adapter)
     diagnostics.extend(rule_diagnostics)
     diagnostics.extend(_registry_diagnostics(documents, request, parsed, adapter_rules))
@@ -426,6 +427,130 @@ def _features_diagnostics(
                     Diagnostic("features", "warning", relative, f"путь кода не найден: {code_path}")
                 )
     return diagnostics
+
+
+def _inputs_diagnostics(parsed: profile.Profile, request: DoctorRequest) -> list[Diagnostic]:
+    if not parsed.inputs:
+        return []
+    folder = _inside(request.root, f"{parsed.docs.dir}/features")
+    if folder is None:
+        return [
+            Diagnostic(
+                "inputs",
+                "warning",
+                "features",
+                "каталог функций выходит за каталог проекта: покрытие не проверено",
+            )
+        ]
+    if not folder.is_dir() or not any(folder.glob("*.md")):
+        return [
+            Diagnostic(
+                "inputs",
+                "warning",
+                "features",
+                "файлов функций нет: покрытие входов не проверено",
+            )
+        ]
+    contracts: dict[str, set[str] | None] = {}
+    for path in sorted(folder.glob("*.md")):
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            continue
+        contracts[path.name] = _contract_ids(text)
+    if not any(ids is not None for ids in contracts.values()):
+        return []
+    diagnostics: list[Diagnostic] = []
+    if not any(contracts.values()):
+        diagnostics.append(
+            Diagnostic(
+                "inputs",
+                "warning",
+                "features",
+                "раздел «Контракты» есть, но id входов не распознаны: первая колонка должна быть id",
+            )
+        )
+    for entry in parsed.inputs:
+        covered = [
+            name for name, ids in contracts.items() if ids is not None and entry.id in ids
+        ]
+        if entry.feature:
+            name = entry.feature.split("/", 1)[1]
+            if name not in contracts:
+                diagnostics.append(
+                    Diagnostic(
+                        "inputs",
+                        "error",
+                        f"inputs/{entry.id}",
+                        f"файла функции нет: {entry.feature}",
+                    )
+                )
+            elif contracts[name] is None:
+                continue
+            elif entry.id not in contracts[name]:
+                diagnostics.append(
+                    Diagnostic(
+                        "inputs",
+                        "error",
+                        f"inputs/{entry.id}",
+                        f"вход не указан в «Контрактах» файла {name}",
+                    )
+                )
+            elif len(covered) > 1:
+                diagnostics.append(
+                    Diagnostic(
+                        "inputs",
+                        "error",
+                        f"inputs/{entry.id}",
+                        "вход покрыт в нескольких файлах: " + ", ".join(covered),
+                    )
+                )
+            continue
+        if not covered:
+            diagnostics.append(
+                Diagnostic(
+                    "inputs",
+                    "error",
+                    f"inputs/{entry.id}",
+                    "вход не покрыт ни одним файлом функции",
+                )
+            )
+        elif len(covered) > 1:
+            diagnostics.append(
+                Diagnostic(
+                    "inputs",
+                    "error",
+                    f"inputs/{entry.id}",
+                    "вход покрыт в нескольких файлах: " + ", ".join(covered),
+                )
+            )
+    return diagnostics
+
+
+def _contract_ids(text: str) -> set[str] | None:
+    visible = _visible_text(text)
+    if "## Контракты" not in visible:
+        return None
+    section = _section_text(visible, "## Контракты")
+    result: set[str] = set()
+    for line in section.splitlines():
+        if not line.strip().startswith("|") or _is_separator(line):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not cells:
+            continue
+        value = cells[0].strip().strip("`").strip()
+        if inputs.ID.fullmatch(value):
+            result.add(value)
+    return result
+
+
+def _section_text(text: str, heading: str) -> str:
+    start = text.find(heading)
+    if start < 0:
+        return ""
+    end = text.find("\n## ", start + 1)
+    return text[start:] if end < 0 else text[start:end]
 
 
 def _code_paths(text: str) -> list[str]:

@@ -29,6 +29,7 @@ python -m unittest discover -s tests -p "test_*.py"
 | `stack.runtime`, `stack.frameworks`, `stack.stores`, `stack.tools` | нет | факты о стеке с провенансом |
 | `layout.source_roots` | да | где лежит исходный код |
 | `layout.layers` | нет | слои: имя, ответственность, разрешённые зависимости |
+| `inputs[]` | нет | публичные входы: `id`, `kind`, `locator`, необязательный `feature`; отсутствие поля позволяет адаптеру заполнить, пустой список — «входов нет» |
 | `tests.framework`, `tests.commands` | нет | чем и как запускаются проверки |
 | `process.branches` | нет | схема веток |
 | `process.review_roles` | да | кто исполняет критику и ревью |

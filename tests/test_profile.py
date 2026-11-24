@@ -23,6 +23,7 @@ from ai_kit.profile import (
     parse,
     print_schema,
 )
+from ai_kit.inputs import Input
 from ai_kit.rules import Rule
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +74,24 @@ class ProfileTests(unittest.TestCase):
         del data["stack"]["runtime"][0]["evidence"]
         self.assert_error(data, "stack.runtime[0].evidence")
 
+    def test_inputs_accepted_and_canonicalized(self) -> None:
+        data = copy.deepcopy(example_data())
+        data["inputs"] = [
+            {"id": "health", "kind": "http", "locator": "GET /health", "feature": "health.md"}
+        ]
+        profile = parse(data)
+        self.assertEqual(profile.inputs[0].feature, "features/health.md")
+
+    def test_input_without_feature_accepted(self) -> None:
+        data = copy.deepcopy(example_data())
+        data["inputs"] = [{"id": "health", "kind": "http", "locator": "GET /health"}]
+        self.assertIsNone(parse(data).inputs[0].feature)
+
+    def test_input_bad_id_rejected(self) -> None:
+        data = copy.deepcopy(example_data())
+        data["inputs"] = [{"id": "Health", "kind": "http", "locator": "GET /health"}]
+        self.assert_error(data, "inputs[0].id")
+
     def test_not_applicable_field_accepted(self) -> None:
         data = copy.deepcopy(example_data())
         data["not_applicable"] = [{"field": "automation.clients", "reason": "клиентов агента нет"}]
@@ -100,6 +119,11 @@ class ProfileTests(unittest.TestCase):
             {"field": "automation.clients", "reason": "повтор"},
         ]
         self.assert_error(data, "not_applicable[1].field")
+
+    def test_not_applicable_inputs_rejected(self) -> None:
+        data = copy.deepcopy(example_data())
+        data["not_applicable"] = [{"field": "inputs", "reason": "входов нет"}]
+        self.assert_error(data, "not_applicable[0].field")
 
     def test_pre_commit_is_required(self) -> None:
         data = copy.deepcopy(example_data())
@@ -149,6 +173,7 @@ class ProfileTests(unittest.TestCase):
             (Rule, properties["rules"]["items"], {}),
             (DisabledGate, properties["gates"]["properties"]["disabled"]["items"], {}),
             (Unknown, properties["unknowns"]["items"], {}),
+            (Input, properties["inputs"]["items"], {}),
         ]
         for cls, node, aliases in checks:
             for field in dataclasses.fields(cls):

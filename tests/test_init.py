@@ -157,6 +157,58 @@ class InitTests(unittest.TestCase):
         generate(self.request(adapter=adapter))
         self.assertIn("нет автоматической проверки", self.read(".project/tech-debt.md"))
 
+    def test_adapter_inputs_seed_profile(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[inputs]]\nid = "health"\nkind = "http"\nlocator = "GET /health"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        data = tomllib.loads(self.read("profile.toml"))
+        self.assertEqual(
+            data["inputs"],
+            [{"id": "health", "kind": "http", "locator": "GET /health"}],
+        )
+
+    def test_adapter_inputs_conflict_with_profile(self) -> None:
+        profile = self.target / "profile.toml"
+        profile.write_text(
+            EXAMPLE.read_text(encoding="utf-8")
+            + '\n[[inputs]]\nid = "health"\nkind = "http"\nlocator = "GET /health"\n',
+            encoding="utf-8",
+        )
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[inputs]]\nid = "other"\nkind = "http"\nlocator = "GET /other"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(profile=profile, adapter=adapter))
+
+    def test_invalid_adapter_inputs_rejected(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[inputs]]\nid = "Bad"\nkind = "http"\nlocator = "GET /health"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
+    def test_refresh_keeps_profile_inputs(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[inputs]]\nid = "health"\nkind = "http"\nlocator = "GET /health"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        before = self.read("profile.toml")
+        adapter.write_text(
+            '[[inputs]]\nid = "other"\nkind = "http"\nlocator = "GET /other"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(refresh=True, profile=self.target / "profile.toml", adapter=adapter))
+        self.assertEqual(self.read("profile.toml"), before)
+
     def test_refresh_updates_generated_fragments_only(self) -> None:
         generate(self.request())
         profile_before = self.read("profile.toml")

@@ -14,6 +14,36 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "profiles" / "example.toml"
 FIXTURE = ROOT / "tests" / "fixtures" / "adapter" / "adapter.toml"
 PYTHON = json.dumps(sys.executable)
+FEATURE = """# Функция
+
+## Назначение
+
+Что-то делает.
+
+## Логика
+
+Порядок действий.
+
+## Контракты
+
+| ID входа | Выход | Доступ | Кто вызывает |
+|---|---|---|---|
+{rows}
+
+## Где в коде
+
+| Часть | Путь |
+|---|---|
+| — | — |
+
+## Нюансы
+
+Нет.
+
+## Что не разобрано
+
+Нет.
+"""
 
 
 def gate_adapter(*, code: int = 0, rules: bool = True, binary: str = PYTHON) -> str:
@@ -61,6 +91,21 @@ class DoctorTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
+    def write_feature(self, name: str, rows: str) -> None:
+        path = self.target / ".project" / "features" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(FEATURE.replace("{rows}", rows), encoding="utf-8")
+
+    def input_adapter(self, **overrides) -> Path:
+        data = {
+            "id": "health",
+            "kind": "http",
+            "locator": "GET /health",
+        }
+        data.update(overrides)
+        lines = "\n".join(f'{key} = "{value}"' for key, value in data.items())
+        return self.write_adapter("[[inputs]]\n" + lines + "\n")
+
     def append(self, relative: str, text: str) -> None:
         path = self.target / relative
         path.write_text(path.read_text(encoding="utf-8") + text, encoding="utf-8")
@@ -70,6 +115,123 @@ class DoctorTests(unittest.TestCase):
         report = self.doctor()
         self.assertTrue(report.ok, report.to_table())
         self.assertEqual([item for item in report.diagnostics if item.severity == "error"], [])
+
+    def test_input_covered(self) -> None:
+        adapter = self.input_adapter()
+        self.make(adapter)
+        self.write_feature("health.md", "| `health` | 200 | public | browser |")
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertFalse(
+            any(item.code == "inputs" for item in report.diagnostics), report.to_table()
+        )
+
+    def test_input_uncovered(self) -> None:
+        adapter = self.input_adapter()
+        self.make(adapter)
+        self.write_feature("other.md", "| `other` | 200 | public | browser |")
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(
+                item.code == "inputs"
+                and item.severity == "error"
+                and "не покрыт" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
+    def test_input_contracts_required(self) -> None:
+        adapter = self.input_adapter()
+        self.make(adapter)
+        self.write_feature("health.md", "| `other` | 200 | public | browser |")
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "inputs" and "не покрыт" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_input_without_features_warns(self) -> None:
+        adapter = self.input_adapter()
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(
+                item.code == "inputs"
+                and item.severity == "warning"
+                and "файлов функций нет" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
+    def test_input_feature_mismatch(self) -> None:
+        adapter = self.input_adapter(feature="features/other.md")
+        self.make(adapter)
+        self.write_feature("health.md", "| `health` | 200 | public | browser |")
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "inputs" and "файла функции нет" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_input_duplicate_coverage(self) -> None:
+        adapter = self.input_adapter()
+        self.make(adapter)
+        self.write_feature("health.md", "| `health` | 200 | public | browser |")
+        self.write_feature("second.md", "| `health` | 200 | public | browser |")
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "inputs" and "нескольких файлах" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_input_second_cell_is_not_coverage(self) -> None:
+        adapter = self.input_adapter()
+        self.make(adapter)
+        self.write_feature("health.md", "| `part` | `health` | public | browser |")
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "inputs" and "не покрыт" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_input_old_contracts_header_warns(self) -> None:
+        adapter = self.input_adapter()
+        self.make(adapter)
+        self.write_feature("health.md", "| GET /health | 200 | public | browser |")
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(
+                item.code == "inputs"
+                and item.severity == "warning"
+                and "id входов не распознаны" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+        self.assertTrue(
+            any(item.code == "inputs" and "не покрыт" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_input_duplicate_with_feature(self) -> None:
+        adapter = self.input_adapter(feature="features/health.md")
+        self.make(adapter)
+        self.write_feature("health.md", "| `health` | 200 | public | browser |")
+        self.write_feature("second.md", "| `health` | 200 | public | browser |")
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "inputs" and "нескольких файлах" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
 
     def test_not_applicable_profile_is_accepted(self) -> None:
         self.make()

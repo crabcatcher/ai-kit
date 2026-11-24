@@ -1,0 +1,10 @@
+{
+  "adapter": "adapter.toml",
+  "setup": [
+    {"write": {"path": ".project/features/other.md", "text": "# Другая функция\n\n## Назначение\n\nНичего не проверяет.\n\n## Логика\n\nНет.\n\n## Контракты\n\n| ID входа | Выход | Доступ | Кто вызывает |\n|---|---|---|---|\n| `other` | 200 | public | мониторинг |\n\n## Где в коде\n\n| Часть | Путь |\n|---|---|\n| — | — |\n\n## Нюансы\n\nНет.\n\n## Что не разобрано\n\nНет.\n"}}
+  ],
+  "expect": [
+    {"code": "inputs", "severity": "error", "path": "inputs/health", "message": "не покрыт"}
+  ],
+  "exit": 1
+}

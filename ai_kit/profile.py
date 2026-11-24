@@ -9,6 +9,7 @@ from dataclasses import fields as dc_fields
 from pathlib import Path
 from typing import Any
 
+from ai_kit import inputs
 from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.rules import LABELS, REQUIRED, Rule, build_rules, rule_errors
@@ -120,6 +121,7 @@ class Profile:
     rules: list[Rule]
     gates: list[DisabledGate]
     unknowns: list[Unknown]
+    inputs: list[inputs.Input]
     adapter_id: str | None
 
 
@@ -205,7 +207,7 @@ def validate(data: Any) -> list[tuple[str, str]]:
     top_allowed = {
         "schema_version", "project", "docs", "stack", "layout", "tests",
         "process", "automation", "security", "rules", "gates", "unknowns",
-        "not_applicable", "adapter",
+        "not_applicable", "inputs", "adapter",
     }
     _check_keys(data, top_allowed, "", errors)
     _text(data.get("schema_version"), "schema_version", errors, required=True)
@@ -269,6 +271,9 @@ def validate(data: Any) -> list[tuple[str, str]]:
             _is_str(role) and _is_str(command) for role, command in commands.items()
         ):
             errors.append(("tests.commands", "ожидается объект «роль → команда»"))
+
+    if "inputs" in data:
+        errors.extend(inputs.errors(data["inputs"]))
 
     process = section("process")
     if process is not None:
@@ -344,6 +349,8 @@ def validate(data: Any) -> list[tuple[str, str]]:
             if profile_schema.resolve(field) is None:
                 errors.append((f"{place}.field", "поля нет в схеме профиля"))
                 continue
+            if field == "inputs":
+                errors.append((f"{place}.field", "для inputs используйте пустой список, а не not_applicable"))
             if profile_schema.is_required(field):
                 errors.append((f"{place}.field", "обязательное поле нельзя объявить неприменимым"))
             if field in seen_fields:
@@ -398,6 +405,7 @@ def parse(data: Any) -> Profile:
         rules=build_rules(data.get("rules", [])),
         gates=[DisabledGate(**gate) for gate in data.get("gates", {}).get("disabled", [])],
         unknowns=[Unknown(**unknown) for unknown in data.get("unknowns", [])],
+        inputs=inputs.parse(data.get("inputs", [])),
         adapter_id=data.get("adapter", {}).get("id"),
     )
 
@@ -512,6 +520,20 @@ def print_schema() -> str:
                                 "may_depend_on": {"type": "array", "items": {"type": "string"}},
                             },
                         },
+                    },
+                },
+            },
+            "inputs": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["id", "kind", "locator"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "id": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+                        "kind": {"type": "string", "minLength": 1},
+                        "locator": {"type": "string", "minLength": 1},
+                        "feature": {"type": "string", "minLength": 1},
                     },
                 },
             },

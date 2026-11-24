@@ -1,0 +1,5 @@
+[[inputs]]
+id = "health"
+kind = "http"
+locator = "GET /health"
+feature = "features/health.md"

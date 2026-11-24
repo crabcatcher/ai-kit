@@ -6,7 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from ai_kit.init import InitError, Request, _apply_commands, generate
+from ai_kit.init import InitError, Request, generate
+from ai_kit.interview import InterviewError, apply_commands
 from ai_kit.profile import parse
 from ai_kit.templates import TemplateError
 
@@ -72,7 +73,7 @@ class InitTests(unittest.TestCase):
 
     def test_profile_and_documents_are_written(self) -> None:
         report = generate(self.request())
-        self.assertEqual(len(report.documents), 16)
+        self.assertEqual(len(report.documents), 17)
         self.assertTrue((self.target / "profile.toml").is_file())
         parse(tomllib.loads(self.read("profile.toml")))
         self.assertIn("# example", self.read("README.md"))
@@ -138,6 +139,14 @@ class InitTests(unittest.TestCase):
         self.assertIn("run-unit", script)
         self.assertTrue((self.target / "tools" / "hooks" / "pre-commit").is_file())
 
+    def test_features_are_indexed_from_files(self) -> None:
+        generate(self.request())
+        path = self.target / ".project" / "features" / "login.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("# Вход\n", encoding="utf-8")
+        generate(self.request())
+        self.assertIn("| Вход | `features/login.md` |", self.read(".project/FEATURES.md"))
+
     def test_scratch_project_from_answers(self) -> None:
         answers = self.target / "answers.toml"
         answers.write_text(ANSWERS, encoding="utf-8")
@@ -201,13 +210,12 @@ class InitTests(unittest.TestCase):
             generate(self.request(adapter=adapter))
 
     def test_adapter_commands_fill_missing_roles(self) -> None:
-        data = {"tests": {}}
-        _apply_commands(data, {"commands": [{"role": "test", "command": "run-tests"}]})
+        data = apply_commands({"tests": {}}, {"commands": [{"role": "test", "command": "run-tests"}]})
         self.assertEqual(data["tests"]["commands"], {"test": "run-tests"})
 
     def test_adapter_commands_reject_unknown_role(self) -> None:
-        with self.assertRaises(InitError):
-            _apply_commands({}, {"commands": [{"role": "smoke", "command": "run"}]})
+        with self.assertRaises(InterviewError):
+            apply_commands({}, {"commands": [{"role": "smoke", "command": "run"}]})
 
     def test_ask_cancel_writes_nothing(self) -> None:
         with patch("builtins.input", side_effect=["", "", "", "n"]), redirect_stdout(io.StringIO()):

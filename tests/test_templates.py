@@ -55,7 +55,7 @@ def find_document(document_id: str) -> Document:
 class ManifestTests(unittest.TestCase):
     def test_manifest_is_valid(self) -> None:
         self.assertEqual(validate_documents(ROOT, DOCUMENTS), [])
-        self.assertEqual(len(DOCUMENTS), 16)
+        self.assertEqual(len(DOCUMENTS), 17)
 
     def test_paths_are_unique(self) -> None:
         paths = [document_path(item, profile()) for item in DOCUMENTS]

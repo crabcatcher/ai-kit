@@ -1,4 +1,5 @@
 .sandbox/
+.pilot/
 .venv/
 __pycache__/
 *.pyc

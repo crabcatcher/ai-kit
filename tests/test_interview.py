@@ -1,8 +1,11 @@
+import io
 import json
 import tomllib
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from ai_kit.interview import (
     ADAPTER_LIMIT,
@@ -23,6 +26,7 @@ from ai_kit.interview import (
     load_answers,
     load_probes,
     load_questions,
+    main as interview_main,
     merge_questions,
     parse_answers,
     parse_probes,
@@ -36,6 +40,7 @@ from ai_kit.interview import (
 ROOT = Path(__file__).resolve().parents[1]
 QUESTIONS = ROOT / "interview" / "questions.toml"
 ADAPTER = ROOT / "tests" / "fixtures" / "adapter" / "adapter.toml"
+EXAMPLE = ROOT / "profiles" / "example.toml"
 
 
 def entry(*, id: str = "one", slots=("project.purpose",), **extra):
@@ -481,6 +486,30 @@ class PlanJsonTests(unittest.TestCase):
 
     def test_describe_unknown_slot(self) -> None:
         self.assertEqual(describe_slot("project.missing"), {"path": "project.missing", "type": "unknown"})
+
+
+class CliTests(unittest.TestCase):
+    def test_check_works_from_project_directory(self) -> None:
+        with TemporaryDirectory() as temporary:
+            output = io.StringIO()
+            with patch("pathlib.Path.cwd", return_value=Path(temporary)), redirect_stdout(output):
+                code = interview_main(["--check", "--adapter", str(ADAPTER)])
+        self.assertEqual(code, 0)
+        self.assertIn("Вопросов:", output.getvalue())
+
+    def test_plan_uses_kit_questions(self) -> None:
+        with TemporaryDirectory() as temporary:
+            output = io.StringIO()
+            with (
+                patch("pathlib.Path.cwd", return_value=Path(temporary)),
+                redirect_stdout(output),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = interview_main(
+                    ["--plan", "--profile", str(EXAMPLE), "--adapter", str(ADAPTER), "--json"]
+                )
+        self.assertEqual(code, 0)
+        self.assertIn('"questions"', output.getvalue())
 
 
 if __name__ == "__main__":

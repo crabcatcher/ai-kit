@@ -13,6 +13,7 @@ from typing import Any
 
 from ai_kit import schema
 from ai_kit.console import configure_console
+from ai_kit.templates import COMMAND_ROLES
 
 UNIVERSAL_LIMIT = 12
 ADAPTER_LIMIT = 5
@@ -220,6 +221,41 @@ def merge_questions(universal: list[Question], adapter: list[Question]) -> Bank:
     if errors:
         raise InterviewError(errors)
     return Bank(tuple(questions), tuple(dropped))
+
+
+def apply_commands(values: dict[str, Any], adapter: dict[str, Any]) -> dict[str, Any]:
+    entries = adapter.get("commands", [])
+    if not entries:
+        return values
+    if not isinstance(entries, list):
+        raise InterviewError([("commands", "ожидается список")])
+    result = copy.deepcopy(values)
+    tests = result.setdefault("tests", {})
+    if not isinstance(tests, dict):
+        raise InterviewError([("tests", "ожидается объект")])
+    commands = tests.setdefault("commands", {})
+    if not isinstance(commands, dict):
+        raise InterviewError([("tests.commands", "ожидается объект")])
+
+    seen: set[str] = set()
+    for position, entry in enumerate(entries):
+        place = f"commands[{position}]"
+        if not isinstance(entry, dict):
+            raise InterviewError([(place, "ожидается объект")])
+        extra = set(entry) - {"role", "command"}
+        if extra:
+            raise InterviewError([(place, f"неизвестные поля: {', '.join(sorted(extra))}")])
+        role = entry.get("role")
+        command = entry.get("command")
+        if role not in COMMAND_ROLES:
+            raise InterviewError([(f"{place}.role", f"ожидается одно из: {', '.join(COMMAND_ROLES)}")])
+        if not isinstance(command, str) or not command.strip():
+            raise InterviewError([(f"{place}.command", "ожидается непустая строка")])
+        if role in seen:
+            raise InterviewError([(f"{place}.role", "роль повторяется")])
+        seen.add(role)
+        commands.setdefault(role, command)
+    return result
 
 
 def load_probes(adapter: dict[str, Any]) -> list[Probe]:
@@ -833,7 +869,12 @@ def _load_adapter(path: str) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = sys.argv[1:] if argv is None else argv
-    root = Path.cwd()
+    kit_root = Path(__file__).resolve().parents[1]
+    project_option = _option(args, "--project")
+    if project_option == "":
+        print("--project требует путь", file=sys.stderr)
+        return 2
+    project_root = Path(project_option) if project_option else Path.cwd()
 
     if "--check" in args:
         adapter_path = _option(args, "--adapter")
@@ -841,7 +882,7 @@ def main(argv: list[str] | None = None) -> int:
             print("--adapter требует путь", file=sys.stderr)
             return 2
         try:
-            universal = load_questions(root / "interview" / "questions.toml")
+            universal = load_questions(kit_root / "interview" / "questions.toml")
             adapter_questions: list[Question] = []
             adapter_probes: list[Probe] = []
             if adapter_path:
@@ -867,9 +908,10 @@ def main(argv: list[str] | None = None) -> int:
             with Path(profile_path).open("rb") as handle:
                 values = tomllib.load(handle)
             adapter_data = _load_adapter(adapter_path)
-            universal = load_questions(root / "interview" / "questions.toml")
+            values = apply_commands(values, adapter_data)
+            universal = load_questions(kit_root / "interview" / "questions.toml")
             bank = merge_questions(universal, load_adapter_questions(adapter_data))
-            prepared = prepare(values, root, load_probes(adapter_data), bank)
+            prepared = prepare(values, project_root, load_probes(adapter_data), bank)
         except (OSError, tomllib.TOMLDecodeError, InterviewError) as error:
             print(f"интервью не построено: {error}", file=sys.stderr)
             return 1
@@ -902,8 +944,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         "Использование: python -m ai_kit.interview --check [--adapter <путь>] | "
-        "--plan --profile <путь> --adapter <путь> | "
-        "--report --profile <путь> --adapter <путь> --answers <путь>",
+        "--plan [--project <путь>] --profile <путь> --adapter <путь> [--json] | "
+        "--report [--project <путь>] --profile <путь> --adapter <путь> --answers <путь>",
         file=sys.stderr,
     )
     return 2

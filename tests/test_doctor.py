@@ -65,18 +65,24 @@ class DoctorTests(unittest.TestCase):
         path = self.target / relative
         path.write_text(path.read_text(encoding="utf-8") + text, encoding="utf-8")
 
-    def test_clean_project_has_no_diagnostics(self) -> None:
+    def test_clean_project_has_no_errors(self) -> None:
         self.make()
         report = self.doctor()
         self.assertTrue(report.ok, report.to_table())
-        self.assertEqual(report.diagnostics, ())
+        self.assertEqual([item for item in report.diagnostics if item.severity == "error"], [])
+
+    def test_empty_adapter_fragment_warns(self) -> None:
+        self.make()
+        report = self.doctor()
+        codes = [item.code for item in report.diagnostics]
+        self.assertIn("adapter", codes)
 
     def test_fixture_gates_are_not_run_without_flag(self) -> None:
         self.make(FIXTURE)
         report = self.doctor(FIXTURE)
         self.assertTrue(report.ok)
-        self.assertEqual([item.code for item in report.diagnostics], ["gate"])
-        self.assertEqual(report.diagnostics[0].severity, "warning")
+        gate = [item for item in report.diagnostics if item.code == "gate"]
+        self.assertEqual(gate[0].severity, "warning")
 
     def test_broken_link_reported(self) -> None:
         self.make()
@@ -128,6 +134,14 @@ class DoctorTests(unittest.TestCase):
         (self.target / "tools" / "pre-commit.py").unlink()
         report = self.doctor()
         self.assertIn("precommit", [item.code for item in report.diagnostics])
+
+    def test_orphan_feature_reported(self) -> None:
+        self.make()
+        path = self.target / ".project" / "features" / "login.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("# Вход\n", encoding="utf-8")
+        report = self.doctor()
+        self.assertIn("features", [item.code for item in report.diagnostics])
 
     def test_stale_registry_reported(self) -> None:
         self.make()

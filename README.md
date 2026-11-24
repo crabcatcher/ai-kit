@@ -31,6 +31,7 @@
 | [docs/interview.md](./docs/interview.md) | банк вопросов и дедупликация, пробы и доказательства, ответы, неизвестное, отчёт |
 | [docs/generator.md](./docs/generator.md) | сборка профиля, рендер, фрагменты адаптера и генератора, правила K/A/P |
 | [docs/doctor.md](./docs/doctor.md) | встроенные проверки, внешние гейты, отчёт и конформанс-корпус |
+| [docs/agent-prompt.md](./docs/agent-prompt.md) | промпт для агента, запущенного из проекта: инициализация и дозаполнение |
 | [docs/roadmap.md](./docs/roadmap.md) | шаги набора, область применения, открытый анализ зрелости проекта |
 | [interview/agent-brief.md](./interview/agent-brief.md) | брифинг для агента, который поднимает набор: порядок, доказательства, запреты |
 | [interview/questions.toml](./interview/questions.toml) | банк 12 универсальных вопросов |
@@ -48,8 +49,8 @@
 | [tests/test_init.py](./tests/test_init.py) | тесты генерации, сохранения фрагментов и профиля |
 | [tests/test_doctor.py](./tests/test_doctor.py) | тесты встроенных проверок и гейтов |
 | [tests/conformance/](./tests/conformance) | корпус фикстур: дефект и ожидаемый диагноз |
-| [templates/](./templates) | 16 шаблонов документов: архитектура, реестр, маршрут, функции, долг |
-| [documents.toml](./documents.toml) | манифест 16 документов: шаблон, путь, назначение |
+| [templates/](./templates) | 17 шаблонов документов: архитектура, реестр, маршрут, функции, долг, план дозаполнения |
+| [documents.toml](./documents.toml) | манифест 17 документов: шаблон, путь, назначение |
 | [profiles/example.toml](./profiles/example.toml) | пример профиля на вымышленном стеке |
 | [tests/fixtures/adapter/adapter.toml](./tests/fixtures/adapter/adapter.toml) | фикстурный адаптер на вымышленном стеке |
 | [tools/forbidden_terms.toml](./tools/forbidden_terms.toml) | список слов для теста чистоты ядра |

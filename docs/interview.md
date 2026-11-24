@@ -127,12 +127,14 @@
 
 ```text
 python -m ai_kit.interview --check [--adapter <путь>]
-python -m ai_kit.interview --plan --profile <путь> --adapter <путь>
-python -m ai_kit.interview --plan --profile <путь> --adapter <путь> --json
-python -m ai_kit.interview --report --profile <путь> --adapter <путь> --answers <путь>
+python -m ai_kit.interview --plan [--project <путь>] --profile <путь> --adapter <путь>
+python -m ai_kit.interview --plan [--project <путь>] --profile <путь> --adapter <путь> --json
+python -m ai_kit.interview --report [--project <путь>] --profile <путь> --adapter <путь> --answers <путь>
 ```
 
 `--check` проверяет банк и пробы адаптера, печатает число вопросов, проб и снятых дублей. `--plan` выполняет пробы и печатает батч; с `--json` — машиночитаемый план. `--report` применяет ответы и печатает отчёт.
+
+Банк вопросов читается из каталога стартера, пробы — из проекта: `--project` задаёт проект, по умолчанию текущий каталог. Поэтому команды работают из каталога проекта. Команды адаптера применяются до батча: роль, уже закрытая адаптером, не спрашивается.
 
 Коды возврата: `0` — успех, `1` — данные не проходят проверку, `2` — ошибка использования.
 

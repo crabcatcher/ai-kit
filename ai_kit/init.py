@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_kit import ask as prompt
-from ai_kit import baseline, interview, precommit, profile, rules, templates, toml_writer
+from ai_kit import baseline, detect, interview, precommit, profile, rules, templates, toml_writer
 from ai_kit.console import configure_console
 
 DEFAULT_DOCS_DIR = ".project"
@@ -61,13 +61,15 @@ class Plan:
     fragments: dict[str, dict[str, str]]
     generated: dict[str, list[rules.Rule]]
     baseline: list[baseline.Violation]
+    features: list[tuple[str, str]]
 
 
 def generate(request: Request) -> Report:
     documents = templates.load_documents(request.kit_root / "documents.toml", request.kit_root)
     values = _load_toml(request.profile) if request.profile else {}
     adapter = _load_toml(request.adapter) if request.adapter else {}
-    _apply_commands(values, adapter)
+    _detect_preflight(adapter)
+    values = interview.apply_commands(values, adapter)
 
     result = _run_interview(values, adapter, request)
     data = _build_profile(result.values, result.unknowns, adapter.get("id"))
@@ -90,6 +92,7 @@ def generate(request: Request) -> Report:
             "project": parsed.rules,
         },
         baseline=baseline_items,
+        features=_feature_rows(request.target, data),
     )
 
     profile_text = toml_writer.dumps(data)
@@ -163,38 +166,6 @@ def _run_interview(values: dict[str, Any], adapter: dict[str, Any], request: Req
     return interview.finish(prepared, answers)
 
 
-def _apply_commands(data: dict[str, Any], adapter: dict[str, Any]) -> None:
-    entries = adapter.get("commands", [])
-    if not entries:
-        return
-    if not isinstance(entries, list):
-        raise InitError("commands: ожидается список")
-    tests = data.setdefault("tests", {})
-    if not isinstance(tests, dict):
-        raise InitError("tests: ожидается объект")
-    commands = tests.setdefault("commands", {})
-    if not isinstance(commands, dict):
-        raise InitError("tests.commands: ожидается объект")
-    seen: set[str] = set()
-    for position, entry in enumerate(entries):
-        place = f"commands[{position}]"
-        if not isinstance(entry, dict):
-            raise InitError(f"{place}: ожидается объект")
-        extra = set(entry) - {"role", "command"}
-        if extra:
-            raise InitError(f"{place}: неизвестные поля: {', '.join(sorted(extra))}")
-        role = entry.get("role")
-        command = entry.get("command")
-        if role not in templates.COMMAND_ROLES:
-            raise InitError(f"{place}.role: ожидается одно из: {', '.join(templates.COMMAND_ROLES)}")
-        if not isinstance(command, str) or not command.strip():
-            raise InitError(f"{place}.command: ожидается непустая строка")
-        if role in seen:
-            raise InitError(f"{place}.role: роль повторяется")
-        seen.add(role)
-        commands.setdefault(role, command)
-
-
 def _build_profile(
     values: dict[str, Any],
     unknowns: list[dict[str, str]],
@@ -249,6 +220,12 @@ def _canon_rules(kit_root: Path) -> list[rules.Rule]:
     if not rows:
         raise InitError("канон не содержит строк K")
     return rows
+
+
+def _detect_preflight(adapter: dict[str, Any]) -> None:
+    _, errors = detect.load(adapter)
+    if errors:
+        raise InitError("detect: " + "; ".join(f"{path}: {message}" for path, message in errors))
 
 
 def _adapter_rules(adapter: dict[str, Any]) -> list[rules.Rule]:
@@ -348,6 +325,7 @@ def _document_fragments(
         "no-gate": lambda: _no_gate_table(rows),
         "rules": lambda: _bullets(rows),
         "baseline": lambda: _baseline_table(plan.baseline),
+        "features": lambda: _features_table(plan.features),
     }
     for name in templates.marker_names(source, "generated"):
         provider = providers.get(name)
@@ -392,6 +370,28 @@ def _no_gate_table(rows: list[rules.Rule]) -> str:
 
 def _bullets(rows: list[rules.Rule]) -> str:
     return "\n".join(f"- {row.id} — {row.text};" for row in rows)
+
+
+def _feature_rows(target: Path, values: dict[str, Any]) -> list[tuple[str, str]]:
+    docs_dir = values.get("docs", {}).get("dir")
+    if not isinstance(docs_dir, str) or not docs_dir:
+        return []
+    folder = target / docs_dir / "features"
+    if not folder.is_dir():
+        return []
+    rows: list[tuple[str, str]] = []
+    for path in sorted(folder.glob("*.md")):
+        title = path.stem
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+        rows.append((title, f"features/{path.name}"))
+    return rows
+
+
+def _features_table(rows: list[tuple[str, str]]) -> str:
+    return "\n".join(f"| {_cell(title)} | `{_cell(path)}` |" for title, path in rows)
 
 
 def _baseline_table(rows: list[baseline.Violation]) -> str:

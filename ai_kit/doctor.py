@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ai_kit import baseline, gates, precommit, profile, rules, templates
+from ai_kit import baseline, detect, gates, precommit, profile, rules, templates
 from ai_kit.console import configure_console
 from ai_kit.diagnostics import Diagnostic, Report
 
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
+FEATURE_LINK = re.compile(r"`([^`]+\.md)`")
+EMPTY_ADAPTER = re.compile(r"<!-- adapter:([a-z0-9-]+):begin -->\s*<!-- adapter:\1:end -->")
 EXTERNAL = ("http://", "https://", "mailto:", "tel:")
 
 
@@ -39,6 +41,12 @@ def run(request: DoctorRequest) -> Report:
 
     raw = _load_profile(request, diagnostics)
     adapter = _load_adapter(request, diagnostics)
+    patterns, detect_errors = detect.load(adapter or {})
+    diagnostics.extend(Diagnostic("adapter", "error", path, message) for path, message in detect_errors)
+    if patterns and not detect.matches(request.root, patterns):
+        diagnostics.append(
+            Diagnostic("adapter", "warning", "detect", "адаптер не узнаёт проект: ни одна маска не найдена")
+        )
     if raw is None:
         return Report(tuple(diagnostics))
 
@@ -51,6 +59,7 @@ def run(request: DoctorRequest) -> Report:
         return Report(tuple(diagnostics))
 
     diagnostics.extend(_document_diagnostics(documents, raw, request))
+    diagnostics.extend(_features_diagnostics(documents, request, parsed))
     adapter_rules, rule_diagnostics = _adapter_rules(adapter)
     diagnostics.extend(rule_diagnostics)
     diagnostics.extend(_registry_diagnostics(documents, request, parsed, adapter_rules))
@@ -164,6 +173,11 @@ def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
         diagnostics.append(Diagnostic("marker", "error", relative, error))
     for empty in templates.empty_sections(text):
         diagnostics.append(Diagnostic("section", "warning", relative, f"пустой раздел {empty}"))
+    if "/templates/" not in relative:
+        for match in EMPTY_ADAPTER.finditer(text):
+            diagnostics.append(
+                Diagnostic("adapter", "warning", relative, f"фрагмент adapter:{match.group(1)} не заполнен")
+            )
     return diagnostics
 
 
@@ -278,6 +292,38 @@ def _precommit_diagnostics(request: DoctorRequest, parsed: profile.Profile) -> l
         if not (request.root / relative).is_file():
             diagnostics.append(
                 Diagnostic("precommit", "error", relative, "нет артефакта проверки перед коммитом")
+            )
+    return diagnostics
+
+
+def _features_diagnostics(
+    documents: list[templates.Document],
+    request: DoctorRequest,
+    parsed: profile.Profile,
+) -> list[Diagnostic]:
+    folder = request.root / parsed.docs.dir / "features"
+    if not folder.is_dir():
+        return []
+    text = _document_text(documents, request, parsed, "features-index")
+    if text is None:
+        return []
+    diagnostics: list[Diagnostic] = []
+    listed: set[str] = set()
+    for line in text.splitlines():
+        if not line.strip().startswith("|"):
+            continue
+        for match in FEATURE_LINK.finditer(line):
+            relative = match.group(1)
+            listed.add(relative)
+            if not (request.root / parsed.docs.dir / relative).is_file():
+                diagnostics.append(
+                    Diagnostic("features", "error", "FEATURES.md", f"файла функции нет: {relative}")
+                )
+    for path in sorted(folder.glob("*.md")):
+        relative = f"features/{path.name}"
+        if relative not in listed:
+            diagnostics.append(
+                Diagnostic("features", "error", "FEATURES.md", f"функция не внесена в карту: {relative}")
             )
     return diagnostics
 

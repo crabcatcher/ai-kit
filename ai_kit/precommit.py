@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shlex
 from typing import Any
 
 PRE_COMMIT = "tools/pre-commit.py"
@@ -18,28 +20,40 @@ def select_commands(data: dict[str, Any]) -> list[tuple[str, str]]:
     return [(role, str(commands[role])) for role in roles]
 
 
+def split_command(command: str) -> list[str]:
+    parts = shlex.split(command, posix=os.name != "nt")
+    return parts or [command]
+
+
 def files(data: dict[str, Any]) -> dict[str, str]:
-    commands = select_commands(data)
-    if not commands:
+    selected = [(role, split_command(command)) for role, command in select_commands(data)]
+    if not selected:
         return {}
-    return {PRE_COMMIT: script(commands), HOOK: hook()}
+    return {PRE_COMMIT: script(selected), HOOK: hook()}
 
 
-def script(commands: list[tuple[str, str]]) -> str:
+def script(commands: list[tuple[str, list[str]]]) -> str:
     return (
         '#!/usr/bin/env python3\n'
         '"""Проверки перед коммитом: остановиться на первой ошибке."""\n'
         "\n"
+        "import os\n"
         "import subprocess\n"
         "import sys\n"
         "\n"
         f"COMMANDS = {commands!r}\n"
         "\n"
         "\n"
+        "def argv(command: list[str]) -> list[str]:\n"
+        '    if os.name == "nt" and command[0].lower().endswith((".bat", ".cmd")):\n'
+        '        return ["cmd", "/c", *command]\n'
+        "    return command\n"
+        "\n"
+        "\n"
         "def main() -> int:\n"
         "    for role, command in COMMANDS:\n"
         '        print(f"[{role}] {command}", flush=True)\n'
-        "        result = subprocess.run(command, shell=True)\n"
+        "        result = subprocess.run(argv(command))\n"
         "        if result.returncode != 0:\n"
         '            print(f"проверка {role} не прошла", file=sys.stderr)\n'
         "            return 1\n"
@@ -52,4 +66,17 @@ def script(commands: list[tuple[str, str]]) -> str:
 
 
 def hook() -> str:
-    return '#!/bin/sh\npython tools/pre-commit.py\n'
+    return (
+        "#!/bin/sh\n"
+        "for candidate in python3 python py; do\n"
+        '  if command -v "$candidate" >/dev/null 2>&1; then\n'
+        '    if [ "$candidate" = "py" ]; then\n'
+        '      py -3 -c "import sys" >/dev/null 2>&1 && exec py -3 tools/pre-commit.py\n'
+        "    else\n"
+        '      "$candidate" -c "import sys" >/dev/null 2>&1 && exec "$candidate" tools/pre-commit.py\n'
+        "    fi\n"
+        "  fi\n"
+        "done\n"
+        'echo "Не найден рабочий Python: установите python3 или py -3" >&2\n'
+        "exit 1\n"
+    )

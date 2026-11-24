@@ -4,6 +4,7 @@ __all__ = [
     "ask",
     "baseline",
     "console",
+    "detect",
     "diagnostics",
     "doctor",
     "gates",

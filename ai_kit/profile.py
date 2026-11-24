@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import json
 import sys
-import tomllib
 from dataclasses import dataclass
 from dataclasses import fields as dc_fields
 from pathlib import Path
 from typing import Any
 
+from ai_kit.args import UsageError, ensure_known
 from ai_kit.console import configure_console
 from ai_kit.rules import LABELS, REQUIRED, Rule, build_rules, rule_errors
+from ai_kit.toml_io import TomlError, load as load_toml
 
 PROVENANCE = ("probe", "answer")
 VERSION_REQUIRES_PROBE = "версия заполняется только из probe с доказательством"
@@ -359,8 +360,7 @@ def parse(data: Any) -> Profile:
 
 
 def load(path: Path) -> Profile:
-    with path.open("rb") as handle:
-        return parse(tomllib.load(handle))
+    return parse(load_toml(path))
 
 
 def _evidence_schema() -> dict[str, Any]:
@@ -424,7 +424,7 @@ def print_schema() -> str:
         "required": ["schema_version", "project", "docs", "stack", "layout", "tests", "process", "automation", "security"],
         "additionalProperties": False,
         "properties": {
-            "schema_version": {"type": "string"},
+            "schema_version": {"type": "string", "minLength": 1},
             "project": {
                 "type": "object",
                 "required": ["name", "purpose", "boundaries"],
@@ -439,7 +439,7 @@ def print_schema() -> str:
                 "type": "object",
                 "required": ["language", "dir"],
                 "additionalProperties": False,
-                "properties": {"language": {"type": "string"}, "dir": {"type": "string"}},
+                "properties": {"language": {"type": "string", "minLength": 1}, "dir": {"type": "string", "minLength": 1}},
             },
             "stack": {
                 "type": "object",
@@ -554,8 +554,16 @@ def print_schema() -> str:
 def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = sys.argv[1:] if argv is None else argv
+    try:
+        ensure_known(args, {"--check", "--print-schema", "--help"})
+    except UsageError as error:
+        print(f"{error}\nИспользование: python -m ai_kit.profile --help", file=sys.stderr)
+        return 2
     if "--print-schema" in args:
         print(print_schema())
+        return 0
+    if "--help" in args:
+        print(__doc__)
         return 0
     if "--check" in args:
         index = args.index("--check")
@@ -564,7 +572,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         try:
             load(Path(args[index + 1]))
-        except (OSError, tomllib.TOMLDecodeError) as error:
+        except (OSError, TomlError) as error:
             print(f"не удалось прочитать профиль: {error}", file=sys.stderr)
             return 2
         except ProfileError as error:

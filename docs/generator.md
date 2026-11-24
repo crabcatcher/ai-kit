@@ -44,6 +44,19 @@
 5. профиль проверяется схемой; не собрался — генерация останавливается, файлы не пишутся;
 6. профиль сериализуется в TOML в порядке разделов, без внешних зависимостей.
 
+### Минимальный набор
+
+`unknown` не заменяет обязательное поле: он попадает в `unknowns`, но профиль всё равно должен собраться. Минимум:
+
+- `project.name`, `project.purpose`, `project.boundaries`;
+- `docs.language`, `docs.dir`;
+- `layout.source_roots`;
+- `process.review_roles`, `process.tiers`;
+- `automation.pre_commit`;
+- `security.access_levels`.
+
+`stack` и `tests` могут быть пустыми. Если обязательного поля нет, `init` перечисляет ошибки профиля и не пишет файлы.
+
 `unknowns` остаются в профиле: генератор не выдумывает значения ради заполненного документа.
 
 ## 3. Рендер документов
@@ -101,6 +114,7 @@
 - всегда создаётся `baseline.toml` (если его нет): принятые нарушения с правилом, местом, причиной, владельцем и триггером. Файл пишется после рендера, поэтому в первом прогоне таблица baseline пуста: строки добавляются в файл и обновляются через `--refresh`;
 - при `pre_commit = true` создаются `tools/pre-commit.py` и `tools/hooks/pre-commit` с ролями `unit` и `lint` (или `test`, если их нет); команды хранятся списком аргументов, хук ищет рабочий `python3`/`python`/`py -3`, `.bat`/`.cmd` запускаются через `cmd /c`. Если PATH не помогает, задаётся `git config hooks.interpreter <путь>` или `AI_KIT_PYTHON`;
 - `--refresh` перерисовывает документы по существующему профилю: обновляет `generated:`-фрагменты, карту функций и baseline, не меняя профиль и не создавая артефакты;
+- запись идёт через временные файлы и `os.replace`: ошибка на этапе подготовки не трогает существующие документы;
 - уже существующие файлы перечисляются в отчёте как перезаписанные: `README.md`, `AGENTS.md` и документы манифеста;
 - повторный запуск на тех же входах даёт те же файлы: сгенерированные фрагменты детерминированы, ручные — сохраняются;
 - коды возврата: `0` — успех, `1` — данные или шаблон не прошли проверку, `2` — ошибка использования.
@@ -111,6 +125,7 @@ python -m ai_kit.init --answers answers.json --dry-run
 python -m ai_kit.init --ask
 python -m ai_kit.init --ask --yes
 python -m ai_kit.init --refresh --profile profile.toml --adapter adapter.toml
+python -m ai_kit.init --profile profile.toml --adapter adapter.toml --write-baseline baseline.toml
 python -m ai_kit.init --profile profile.toml --adapter adapter.toml --write-profile docs-profile.toml
 ```
 

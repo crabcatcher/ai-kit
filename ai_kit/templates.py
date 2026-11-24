@@ -5,13 +5,14 @@ from __future__ import annotations
 import posixpath
 import re
 import sys
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ai_kit import schema
+from ai_kit.args import UsageError, ensure_known
 from ai_kit.console import configure_console
+from ai_kit.toml_io import TomlError, load as load_toml
 
 COMMAND_ROLES = ("test", "unit", "e2e", "lint", "build", "migrate")
 NO_COMMAND = "гейтов нет"
@@ -71,7 +72,7 @@ class RenderContext:
 
 
 def load_documents(manifest: Path, root: Path) -> list[Document]:
-    data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    data = load_toml(manifest)
     errors: list[str] = []
     entries = data.get("document")
     if not isinstance(entries, list) or not entries:
@@ -528,11 +529,19 @@ def _normalize(lines: list[str]) -> str:
 def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = sys.argv[1:] if argv is None else argv
+    try:
+        ensure_known(args, {"--check", "--render", "--profile", "--help"})
+    except UsageError as error:
+        print(f"{error}\nИспользование: python -m ai_kit.templates --help", file=sys.stderr)
+        return 2
     root = Path.cwd()
+    if "--help" in args:
+        print(__doc__)
+        return 0
 
     try:
         documents = load_documents(root / "documents.toml", root)
-    except (OSError, tomllib.TOMLDecodeError, TemplateError) as error:
+    except (OSError, TomlError, TemplateError) as error:
         print(f"не удалось прочитать манифест: {error}", file=sys.stderr)
         return 2
 
@@ -559,9 +568,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"документа {document_id} нет в манифесте", file=sys.stderr)
             return 2
         try:
-            with Path(args[profile_index + 1]).open("rb") as handle:
-                values = tomllib.load(handle)
-        except (OSError, tomllib.TOMLDecodeError) as error:
+            values = load_toml(Path(args[profile_index + 1]))
+        except (OSError, TomlError) as error:
             print(f"не удалось прочитать профиль: {error}", file=sys.stderr)
             return 2
         commands = values.get("tests", {}).get("commands", {})

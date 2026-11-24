@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-kit"
+version = "0.1.0"
+description = "Backend documentation starter for AI agents: canon, registry, templates, interview, generator and doctor"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "ai-kit" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.scripts]
+ai-kit = "ai_kit.cli:main"
+
+[tool.setuptools]
+packages = ["ai_kit"]

@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import re
 import sys
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ai_kit import baseline, detect, gates, precommit, profile, rules, templates
+from ai_kit.args import UsageError, ensure_known
 from ai_kit.console import configure_console
 from ai_kit.diagnostics import Diagnostic, Report
+from ai_kit.toml_io import TomlError, load as load_toml
 
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
 FEATURE_LINK = re.compile(r"`([^`]+\.md)`")
@@ -26,13 +27,14 @@ class DoctorRequest:
     adapter: Path | None = None
     kit_root: Path = Path(__file__).resolve().parents[1]
     gates: bool = False
+    baseline: str = "baseline.toml"
 
 
 def run(request: DoctorRequest) -> Report:
     diagnostics: list[Diagnostic] = []
     try:
         documents = templates.load_documents(request.kit_root / "documents.toml", request.kit_root)
-    except (OSError, tomllib.TOMLDecodeError, templates.TemplateError) as error:
+    except (OSError, TomlError, templates.TemplateError) as error:
         return Report((Diagnostic("manifest", "error", "documents.toml", str(error)),))
 
     for error in templates.validate_documents(request.kit_root, documents):
@@ -73,7 +75,7 @@ def run(request: DoctorRequest) -> Report:
     diagnostics.extend(_gate_coverage(gate_list, adapter_rules))
     if gate_list:
         if request.gates:
-            results = gates.run_gates(gate_list, request.root)
+            results = gates.run_gates(gate_list, request.root, request.root / request.baseline)
             diagnostics.extend(results)
             diagnostics.extend(_stub_registry_diagnostics(results, gate_list, adapter_rules))
         else:
@@ -109,9 +111,8 @@ def _stub_registry_diagnostics(
 
 def _load_profile(request: DoctorRequest, diagnostics: list[Diagnostic]) -> dict[str, Any] | None:
     try:
-        with request.profile.open("rb") as handle:
-            return tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as error:
+        return load_toml(request.profile)
+    except (OSError, TomlError) as error:
         diagnostics.append(Diagnostic("profile", "error", request.profile.name, f"профиль не читается: {error}"))
         return None
 
@@ -120,9 +121,8 @@ def _load_adapter(request: DoctorRequest, diagnostics: list[Diagnostic]) -> dict
     if request.adapter is None:
         return None
     try:
-        with request.adapter.open("rb") as handle:
-            return tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as error:
+        return load_toml(request.adapter)
+    except (OSError, TomlError) as error:
         diagnostics.append(Diagnostic("adapter", "error", request.adapter.name, f"адаптер не читается: {error}"))
         return None
 
@@ -273,12 +273,12 @@ def _rule_ids(
 
 
 def _baseline_diagnostics(request: DoctorRequest, rule_ids: set[str]) -> list[Diagnostic]:
-    path = request.root / "baseline.toml"
+    path = request.root / request.baseline
     if not path.is_file():
         return []
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as error:
+        data = load_toml(path)
+    except (OSError, TomlError) as error:
         return [Diagnostic("baseline", "error", "baseline.toml", f"baseline не читается: {error}")]
     return [
         Diagnostic("baseline", "error", f"baseline.toml:{place}" if place else "baseline.toml", message)
@@ -396,6 +396,11 @@ def _option(args: list[str], name: str) -> str | None:
 def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = sys.argv[1:] if argv is None else argv
+    try:
+        ensure_known(args, {"--profile", "--adapter", "--gates", "--json", "--baseline", "--help"})
+    except UsageError as error:
+        print(f"{error}\nИспользование: python -m ai_kit.doctor --help", file=sys.stderr)
+        return 2
     if "--help" in args:
         print(__doc__)
         return 0
@@ -414,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
         profile=Path(profile_path),
         adapter=Path(adapter_path) if adapter_path else None,
         gates="--gates" in args,
+        baseline=_option(args, "--baseline") or "baseline.toml",
     )
     report = run(request)
     if "--json" in args:

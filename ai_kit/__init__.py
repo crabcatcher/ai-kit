@@ -1,8 +1,10 @@
 """ai-kit: бэкенд-стартер методологии для проектов."""
 
 __all__ = [
+    "args",
     "ask",
     "baseline",
+    "cli",
     "console",
     "detect",
     "diagnostics",
@@ -16,5 +18,6 @@ __all__ = [
     "rules",
     "schema",
     "templates",
+    "toml_io",
     "toml_writer",
 ]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from ai_kit.args import UsageError, ensure_known
 from ai_kit.console import configure_console
 
 
@@ -20,6 +21,11 @@ def launcher(kit_root: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = sys.argv[1:] if argv is None else argv
+    try:
+        ensure_known(args, {"--help"})
+    except UsageError as error:
+        print(error, file=sys.stderr)
+        return 2
     if "--help" in args:
         print(__doc__)
         return 0

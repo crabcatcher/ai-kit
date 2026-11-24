@@ -1,0 +1,8 @@
+include README.md
+include AGENTS.md
+include documents.toml
+recursive-include templates *.tpl
+recursive-include canon *.md
+recursive-include interview *.md *.toml
+recursive-include profiles *.toml
+recursive-include docs *.md

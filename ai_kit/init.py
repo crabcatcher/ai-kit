@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import copy
+import os
 import re
 import sys
-import tomllib
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ai_kit import ask as prompt
 from ai_kit import baseline, detect, interview, precommit, profile, rules, templates, toml_writer
+from ai_kit.args import UsageError, ensure_known
 from ai_kit.console import configure_console
+from ai_kit.toml_io import TomlError, load as load_toml
 
 DEFAULT_DOCS_DIR = ".project"
 DEFAULT_LANGUAGE = "ru"
@@ -109,11 +112,7 @@ def generate(request: Request) -> Report:
             )
 
     if not request.dry_run:
-        _write(profile_path, profile_text)
-        for path, text in outputs:
-            _write(path, text)
-        for path, text in artifacts:
-            _write(path, text)
+        _write_all([(profile_path, profile_text), *outputs, *artifacts])
 
     return Report(
         profile=_display(request.target, profile_path),
@@ -143,8 +142,7 @@ def _refresh(request: Request) -> Report:
     profile_path = _safe_path(request.target, request.write_profile, "профиль")
     overwritten = _overwritten(request.target, [path for path, _ in outputs])
     if not request.dry_run:
-        for path, text in outputs:
-            _write(path, text)
+        _write_all(outputs)
     return Report(
         profile=_display(request.target, profile_path),
         documents=tuple(_display(request.target, path) for path, _ in outputs),
@@ -166,7 +164,7 @@ def _plan(
     documents = templates.load_documents(request.kit_root / "documents.toml", request.kit_root)
     try:
         items = baseline.load(plan_baseline_path(request))
-    except (baseline.BaselineError, OSError, tomllib.TOMLDecodeError) as error:
+    except (baseline.BaselineError, OSError, TomlError) as error:
         raise InitError(f"baseline не прочитан:\n{error}") from error
     return Plan(
         documents=documents,
@@ -474,11 +472,23 @@ def _safe_path(target: Path, relative: str, what: str) -> Path:
     return candidate
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
-    if path.name == "pre-commit" and path.parent.name == "hooks":
-        path.chmod(0o755)
+def _write_all(files: list[tuple[Path, str]]) -> None:
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for path, text in files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(text)
+            staged.append((Path(temporary), path))
+        for temporary, path in staged:
+            os.replace(temporary, path)
+            if path.name == "pre-commit" and path.parent.name == "hooks":
+                path.chmod(0o755)
+    finally:
+        for temporary, _ in staged:
+            if temporary.exists():
+                temporary.unlink()
 
 
 def _display(target: Path, path: Path) -> str:
@@ -489,8 +499,7 @@ def _display(target: Path, path: Path) -> str:
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
-    with path.open("rb") as handle:
-        return tomllib.load(handle)
+    return load_toml(path)
 
 
 def _option(args: list[str], name: str) -> str | None:
@@ -503,6 +512,17 @@ def _option(args: list[str], name: str) -> str | None:
 def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = sys.argv[1:] if argv is None else argv
+    try:
+        ensure_known(
+            args,
+            {
+                "--profile", "--adapter", "--answers", "--write-profile", "--write-baseline",
+                "--dry-run", "--ask", "--yes", "--refresh", "--help",
+            },
+        )
+    except UsageError as error:
+        print(f"{error}\nИспользование: python -m ai_kit.init --help", file=sys.stderr)
+        return 2
     if "--help" in args:
         print(__doc__)
         return 0
@@ -513,7 +533,10 @@ def main(argv: list[str] | None = None) -> int:
     write_profile = _option(args, "--write-profile")
     if write_profile is None:
         write_profile = "profile.toml"
-    if profile_path == "" or adapter_path == "" or answers_path == "" or write_profile == "":
+    write_baseline = _option(args, "--write-baseline")
+    if write_baseline is None:
+        write_baseline = "baseline.toml"
+    if profile_path == "" or adapter_path == "" or answers_path == "" or write_profile == "" or write_baseline == "":
         print("после --profile, --adapter, --answers и --write-profile нужен путь", file=sys.stderr)
         return 2
     if not profile_path and not answers_path and "--ask" not in args:
@@ -533,6 +556,7 @@ def main(argv: list[str] | None = None) -> int:
         adapter=Path(adapter_path) if adapter_path else None,
         answers=Path(answers_path) if answers_path else None,
         write_profile=write_profile,
+        write_baseline=write_baseline,
         dry_run="--dry-run" in args,
         ask="--ask" in args,
         yes="--yes" in args,
@@ -542,7 +566,7 @@ def main(argv: list[str] | None = None) -> int:
         report = generate(request)
     except (
         OSError,
-        tomllib.TOMLDecodeError,
+        TomlError,
         InitError,
         interview.InterviewError,
         prompt.AskAborted,

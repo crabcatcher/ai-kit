@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from ai_kit.toml_io import load as load_toml
 
 FIELDS = ("rule", "path", "reason", "owner", "trigger")
 NO_VALUE = "—"
@@ -33,7 +34,7 @@ class Violation:
 def load(path: Path, rule_ids: set[str] | None = None) -> list[Violation]:
     if not path.is_file():
         return []
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    data = load_toml(path)
     return parse(data, rule_ids)
 
 

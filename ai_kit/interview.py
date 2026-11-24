@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from ai_kit import schema
+from ai_kit.args import UsageError, ensure_known
 from ai_kit.console import configure_console
 from ai_kit.templates import COMMAND_ROLES
+from ai_kit.toml_io import TomlError, load as load_toml
 
 UNIVERSAL_LIMIT = 12
 ADAPTER_LIMIT = 5
@@ -119,7 +121,7 @@ class InterviewResult:
 
 
 def load_questions(path: Path, source: str = "universal") -> list[Question]:
-    return parse_questions(tomllib.loads(path.read_text(encoding="utf-8")), source)
+    return parse_questions(load_toml(path), source)
 
 
 def parse_questions(data: dict[str, Any], source: str) -> list[Question]:
@@ -516,8 +518,10 @@ def plan_batch(questions: list[Question], values: dict[str, Any]) -> list[Questi
 
 
 def load_answers(path: Path) -> list[Answer]:
-    text = path.read_text(encoding="utf-8")
-    data = json.loads(text) if path.suffix == ".json" else tomllib.loads(text)
+    if path.suffix == ".json":
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    else:
+        data = load_toml(path)
     return parse_answers(data)
 
 
@@ -874,14 +878,24 @@ def _option(args: list[str], name: str) -> str | None:
 
 
 def _load_adapter(path: str) -> dict[str, Any]:
-    with Path(path).open("rb") as handle:
-        return tomllib.load(handle)
+    return load_toml(Path(path))
 
 
 def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = sys.argv[1:] if argv is None else argv
+    try:
+        ensure_known(
+            args,
+            {"--check", "--plan", "--report", "--json", "--profile", "--adapter", "--answers", "--project", "--help"},
+        )
+    except UsageError as error:
+        print(f"{error}\nИспользование: python -m ai_kit.interview --help", file=sys.stderr)
+        return 2
     kit_root = Path(__file__).resolve().parents[1]
+    if "--help" in args:
+        print(__doc__)
+        return 0
     project_option = _option(args, "--project")
     if project_option == "":
         print("--project требует путь", file=sys.stderr)
@@ -902,7 +916,7 @@ def main(argv: list[str] | None = None) -> int:
                 adapter_questions = load_adapter_questions(adapter_data)
                 adapter_probes = load_probes(adapter_data)
             bank = merge_questions(universal, adapter_questions)
-        except (OSError, tomllib.TOMLDecodeError, InterviewError) as error:
+        except (OSError, TomlError, InterviewError) as error:
             print(f"банк вопросов не проходит проверку: {error}", file=sys.stderr)
             return 1
         dropped = ", ".join(item.id for item in bank.dropped) or "нет"
@@ -917,14 +931,13 @@ def main(argv: list[str] | None = None) -> int:
             print("нужны --profile <путь> и --adapter <путь>", file=sys.stderr)
             return 2
         try:
-            with Path(profile_path).open("rb") as handle:
-                values = tomllib.load(handle)
+            values = load_toml(Path(profile_path))
             adapter_data = _load_adapter(adapter_path)
             values = apply_commands(values, adapter_data)
             universal = load_questions(kit_root / "interview" / "questions.toml")
             bank = merge_questions(universal, load_adapter_questions(adapter_data))
             prepared = prepare(values, project_root, load_probes(adapter_data), bank)
-        except (OSError, tomllib.TOMLDecodeError, InterviewError) as error:
+        except (OSError, TomlError, InterviewError) as error:
             print(f"интервью не построено: {error}", file=sys.stderr)
             return 1
 
@@ -943,7 +956,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         try:
             answers = load_answers(Path(answers_path))
-        except (OSError, tomllib.TOMLDecodeError, InterviewError) as error:
+        except (OSError, TomlError, InterviewError) as error:
             print(f"ответы не проходят проверку: {error}", file=sys.stderr)
             return 1
         try:

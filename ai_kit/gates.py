@@ -106,15 +106,15 @@ def _command(value: Any, path: str) -> tuple[tuple[str, ...], list[Diagnostic]]:
     return tuple(tokens), []
 
 
-def run_gates(gates: list[Gate], root: Path) -> list[Diagnostic]:
+def run_gates(gates: list[Gate], root: Path, baseline: Path | None = None) -> list[Diagnostic]:
+    path = baseline or root / "baseline.toml"
     diagnostics: list[Diagnostic] = []
     for gate in gates:
-        diagnostics.extend(_run_gate(gate, root))
+        diagnostics.extend(_run_gate(gate, root, path))
     return diagnostics
 
 
-def _argv(gate: Gate, root: Path) -> list[str] | None:
-    baseline = root / "baseline.toml"
+def _argv(gate: Gate, root: Path, baseline: Path) -> list[str] | None:
     argv: list[str] = []
     for token in gate.argv:
         if "{baseline}" in token and not baseline.is_file():
@@ -123,7 +123,7 @@ def _argv(gate: Gate, root: Path) -> list[str] | None:
     return argv
 
 
-def _run_gate(gate: Gate, root: Path) -> list[Diagnostic]:
+def _run_gate(gate: Gate, root: Path, baseline: Path) -> list[Diagnostic]:
     if gate.binary:
         version, error = probe_binary(gate.binary, root)
         if error:
@@ -141,7 +141,7 @@ def _run_gate(gate: Gate, root: Path) -> list[Diagnostic]:
                     )
                 ]
 
-    argv = _argv(gate, root)
+    argv = _argv(gate, root, baseline)
     if argv is None:
         return [Diagnostic("gate", "gap", gate.id, f"гейт {gate.id}: нет baseline.toml")]
     try:

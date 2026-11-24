@@ -130,7 +130,7 @@ Doctor только читает. Он не правит документы, н�
 
 ```text
 python -m ai_kit.doctor --profile profile.toml
-python -m ai_kit.doctor --profile profile.toml --adapter adapter.toml --gates
+python -m ai_kit.doctor --profile profile.toml --baseline baseline.toml --adapter adapter.toml --gates
 python -m ai_kit.doctor --profile profile.toml --json
 python -m unittest discover -s tests -p "test_*.py"
 ```

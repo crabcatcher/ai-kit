@@ -96,7 +96,7 @@
 | `features-index` | `{docs.dir}/FEATURES.md` | карта функциональности |
 | `tech-debt` | `{docs.dir}/tech-debt.md` | отложенное с триггером |
 | `incidents` | `{docs.dir}/incidents.md` | журнал сбоев агента |
-| `post-init` | `{docs.dir}/post-init.md` | план дозаполнения по майлстоунам |
+| `completion` | `{docs.dir}/completion.md` | план дозаполнения по майлстоунам |
 | `plan` | `{docs.dir}/templates/plan.md` | шаблон плана для копирования |
 | `review-report` | `{docs.dir}/templates/review-report.md` | шаблон отчёта ревью |
 | `feature` | `{docs.dir}/templates/feature.md` | шаблон файла функции |

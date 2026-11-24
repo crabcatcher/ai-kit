@@ -77,7 +77,7 @@ def hook() -> str:
         "#!/bin/sh\n"
         'configured=$(git config --get hooks.interpreter 2>/dev/null || true)\n'
         'if [ -n "$configured" ]; then exec "$configured" tools/pre-commit.py; fi\n'
-        'if [ -n "$AI_KIT_PYTHON" ]; then exec "$AI_KIT_PYTHON" tools/pre-commit.py; fi\n'
+        'if [ -n "$PRECOMMIT_PYTHON" ]; then exec "$PRECOMMIT_PYTHON" tools/pre-commit.py; fi\n'
         "for candidate in python3 python py; do\n"
         '  if command -v "$candidate" >/dev/null 2>&1; then\n'
         '    if [ "$candidate" = "py" ]; then\n'
@@ -87,6 +87,6 @@ def hook() -> str:
         "    fi\n"
         "  fi\n"
         "done\n"
-        'echo "Не найден рабочий Python: задайте git config hooks.interpreter <путь> или AI_KIT_PYTHON" >&2\n'
+        'echo "Не найден рабочий Python: задайте git config hooks.interpreter <путь> или PRECOMMIT_PYTHON" >&2\n'
         "exit 1\n"
     )

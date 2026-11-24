@@ -81,9 +81,9 @@ path = "{docs.dir}/incidents.md"
 title = "Журнал сбоев"
 
 [[document]]
-id = "post-init"
-template = "templates/post-init.md.tpl"
-path = "{docs.dir}/post-init.md"
+id = "completion"
+template = "templates/completion.md.tpl"
+path = "{docs.dir}/completion.md"
 title = "План дозаполнения"
 
 [[document]]

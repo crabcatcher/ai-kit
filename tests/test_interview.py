@@ -204,29 +204,29 @@ class ProbeParsingTests(unittest.TestCase):
         self.assert_error([self.probe(extract="none:x")], "probes[0].extract")
 
     def test_dotted_key_path_allowed(self) -> None:
-        probes = parse_probes([self.probe(extract=r"json:dependencies.socket\.io")])
-        self.assertEqual(probes[0].extract, r"json:dependencies.socket\.io")
+        probes = parse_probes([self.probe(extract=r"json:dependencies.service\.name")])
+        self.assertEqual(probes[0].extract, r"json:dependencies.service\.name")
 
     def test_at_and_slash_in_path_allowed(self) -> None:
-        probes = parse_probes([self.probe(extract="json:dependencies.@dx/ecg-markup")])
-        self.assertEqual(probes[0].extract, "json:dependencies.@dx/ecg-markup")
+        probes = parse_probes([self.probe(extract="json:dependencies.@team/component")])
+        self.assertEqual(probes[0].extract, "json:dependencies.@team/component")
 
     def test_presence_probe_with_match_rule_allowed(self) -> None:
         probes = parse_probes(
             [
                 {
-                    "id": "postgres",
-                    "globs": ["package.json"],
+                    "id": "store",
+                    "globs": ["manifest.json"],
                     "field": "stack.stores",
-                    "name": "postgres",
+                    "name": "store",
                     "version": "none",
-                    "extract": "regex:postgres",
+                    "extract": "regex:store",
                     "provenance": "probe",
                 }
             ]
         )
         self.assertFalse(probes[0].version_required)
-        self.assertEqual(probes[0].extract, "regex:postgres")
+        self.assertEqual(probes[0].extract, "regex:store")
 
     def test_keys_probe_without_name_allowed(self) -> None:
         data = self.probe(extract="json-keys:dependencies")
@@ -255,6 +255,20 @@ class ProbeParsingTests(unittest.TestCase):
         second = self.probe(id="second", extract="json-keys:devDependencies")
         second.pop("name")
         self.assert_error([first, second], "probes[1].field")
+
+    def test_value_path_allowed_for_keys(self) -> None:
+        data = self.probe(extract="json-keys:dependencies", value_path="version")
+        data.pop("name")
+        probes = parse_probes([data])
+        self.assertEqual(probes[0].value_path, "version")
+
+    def test_value_path_rejected_for_plain_probe(self) -> None:
+        self.assert_error([self.probe(value_path="version")], "probes[0].value_path")
+
+    def test_value_path_must_be_path(self) -> None:
+        data = self.probe(extract="json-keys:dependencies", value_path="bad path")
+        data.pop("name")
+        self.assert_error([data], "probes[0].value_path")
 
     def test_provenance_answer_rejected(self) -> None:
         self.assert_error([self.probe(provenance="answer")], "probes[0].provenance")
@@ -310,37 +324,37 @@ class ProbeRunTests(unittest.TestCase):
         self.assertEqual(hits[0].value, "7")
 
     def test_dotted_key_probe(self) -> None:
-        self.write("manifest.json", '{"dependencies": {"socket.io": "1.2"}}')
+        self.write("manifest.json", '{"dependencies": {"service.name": "1.2"}}')
         probe = Probe(
             "runtime",
             ("manifest.json",),
             "stack.runtime",
-            r"json:dependencies.socket\.io",
+            r"json:dependencies.service\.name",
             "runtime",
         )
         hits, _ = run_probes(self.root, [probe])
         self.assertEqual(hits[0].value, "1.2")
 
     def test_at_and_slash_key_probe(self) -> None:
-        self.write("manifest.json", '{"dependencies": {"@dx/ecg-markup": "2.0"}}')
+        self.write("manifest.json", '{"dependencies": {"@team/component": "2.0"}}')
         probe = Probe(
             "framework",
             ("manifest.json",),
             "stack.frameworks",
-            "json:dependencies.@dx/ecg-markup",
-            "ecg",
+            "json:dependencies.@team/component",
+            "component",
         )
         hits, _ = run_probes(self.root, [probe])
         self.assertEqual(hits[0].value, "2.0")
 
     def test_presence_probe_requires_mention(self) -> None:
-        self.write("manifest.json", '{"dependencies": {"pg": "1.0"}}')
+        self.write("manifest.json", '{"dependencies": {"cache": "1.0"}}')
         probe = Probe(
-            "postgres",
+            "store",
             ("manifest.json",),
             "stack.stores",
-            "regex:postgres",
-            "postgres",
+            "regex:store",
+            "store",
             version_required=False,
         )
         hits, misses = run_probes(self.root, [probe])
@@ -348,13 +362,13 @@ class ProbeRunTests(unittest.TestCase):
         self.assertIn("значение не найдено", misses[0].reason)
 
     def test_presence_probe_hits_on_mention(self) -> None:
-        self.write("manifest.json", '{"dependencies": {"postgres": "16"}}')
+        self.write("manifest.json", '{"dependencies": {"store": "16"}}')
         probe = Probe(
-            "postgres",
+            "store",
             ("manifest.json",),
             "stack.stores",
-            "regex:postgres",
-            "postgres",
+            "regex:store",
+            "store",
             version_required=False,
         )
         hits, misses = run_probes(self.root, [probe])
@@ -365,29 +379,29 @@ class ProbeRunTests(unittest.TestCase):
         values = {
             "stack": {
                 "stores": [
-                    {"name": "postgres", "version": "16", "evidence": "old", "provenance": "probe"}
+                    {"name": "store", "version": "16", "evidence": "old", "provenance": "probe"}
                 ]
             }
         }
         result = apply_probe_hits(
             values,
-            [ProbeHit("postgres", "stack.stores", "postgres", None, "manifest.json")],
+            [ProbeHit("store", "stack.stores", "store", None, "manifest.json")],
         )
         self.assertEqual(result["stack"]["stores"][0]["version"], "16")
 
     def test_keys_probe_returns_all_keys(self) -> None:
-        self.write("manifest.json", '{"dependencies": {"pg": "16", "socket.io": "4"}}')
+        self.write("manifest.json", '{"dependencies": {"store": "16", "service.name": "4"}}')
         probe = Probe("deps", ("manifest.json",), "stack.tools", "json-keys:dependencies", None)
         hits, misses = run_probes(self.root, [probe])
         self.assertEqual(misses, [])
         self.assertEqual(
             {hit.name: hit.value for hit in hits},
-            {"pg": "16", "socket.io": "4"},
+            {"store": "16", "service.name": "4"},
         )
         self.assertEqual({hit.evidence for hit in hits}, {"manifest.json"})
 
     def test_keys_probe_version_none(self) -> None:
-        self.write("manifest.json", '{"dependencies": {"pg": "16"}}')
+        self.write("manifest.json", '{"dependencies": {"store": "16"}}')
         probe = Probe(
             "deps",
             ("manifest.json",),
@@ -397,7 +411,7 @@ class ProbeRunTests(unittest.TestCase):
             version_required=False,
         )
         hits, _ = run_probes(self.root, [probe])
-        self.assertEqual(hits[0].name, "pg")
+        self.assertEqual(hits[0].name, "store")
         self.assertIsNone(hits[0].value)
 
     def test_keys_probe_non_scalar_and_empty_version(self) -> None:
@@ -422,20 +436,20 @@ class ProbeRunTests(unittest.TestCase):
         self.assertIn("путь не найден", misses[0].reason)
 
     def test_keys_probe_not_object_is_miss(self) -> None:
-        self.write("manifest.json", '{"dependencies": ["pg"]}')
+        self.write("manifest.json", '{"dependencies": ["store"]}')
         probe = Probe("deps", ("manifest.json",), "stack.tools", "json-keys:dependencies", None)
         _, misses = run_probes(self.root, [probe])
         self.assertIn("не объект", misses[0].reason)
 
     def test_keys_probe_toml(self) -> None:
-        self.write("config.toml", '[dependencies]\npg = "16"\n')
+        self.write("config.toml", '[dependencies]\nstore = "16"\n')
         probe = Probe("deps", ("config.toml",), "stack.tools", "toml-keys:dependencies", None)
         hits, _ = run_probes(self.root, [probe])
-        self.assertEqual(hits[0].name, "pg")
+        self.assertEqual(hits[0].name, "store")
         self.assertEqual(hits[0].value, "16")
 
     def test_keys_probe_toml_version_none(self) -> None:
-        self.write("config.toml", '[dependencies]\npg = "16"\n')
+        self.write("config.toml", '[dependencies]\nstore = "16"\n')
         probe = Probe(
             "deps",
             ("config.toml",),
@@ -445,7 +459,7 @@ class ProbeRunTests(unittest.TestCase):
             version_required=False,
         )
         hits, _ = run_probes(self.root, [probe])
-        self.assertEqual(hits[0].name, "pg")
+        self.assertEqual(hits[0].name, "store")
         self.assertIsNone(hits[0].value)
 
     def test_keys_probe_unparsed_file_is_miss(self) -> None:
@@ -461,23 +475,53 @@ class ProbeRunTests(unittest.TestCase):
         self.assertIn("ключей нет", misses[0].reason)
 
     def test_keys_probe_whitespace_version(self) -> None:
-        self.write("manifest.json", '{"dependencies": {"pg": "  "}}')
+        self.write("manifest.json", '{"dependencies": {"store": "  "}}')
         probe = Probe("deps", ("manifest.json",), "stack.tools", "json-keys:dependencies", None)
         hits, _ = run_probes(self.root, [probe])
         self.assertIsNone(hits[0].value)
 
+    def test_keys_probe_value_path(self) -> None:
+        self.write(
+            "manifest.json",
+            '{"dependencies": {"a": {"version": "1"}, "b": {"name": "x"}}}',
+        )
+        probe = Probe(
+            "deps",
+            ("manifest.json",),
+            "stack.tools",
+            "json-keys:dependencies",
+            None,
+            value_path="version",
+        )
+        hits, _ = run_probes(self.root, [probe])
+        self.assertEqual({hit.name: hit.value for hit in hits}, {"a": "1", "b": None})
+
+    def test_keys_probe_value_path_with_version_none(self) -> None:
+        self.write("manifest.json", '{"dependencies": {"a": {"version": "1"}}}')
+        probe = Probe(
+            "deps",
+            ("manifest.json",),
+            "stack.tools",
+            "json-keys:dependencies",
+            None,
+            version_required=False,
+            value_path="version",
+        )
+        hits, _ = run_probes(self.root, [probe])
+        self.assertIsNone(hits[0].value)
+
     def test_keys_probe_at_and_slash_name(self) -> None:
-        self.write("manifest.json", '{"dependencies": {"@dx/ecg-markup": "2"}}')
+        self.write("manifest.json", '{"dependencies": {"@team/component": "2"}}')
         probe = Probe("deps", ("manifest.json",), "stack.tools", "json-keys:dependencies", None)
         hits, _ = run_probes(self.root, [probe])
-        self.assertEqual(hits[0].name, "@dx/ecg-markup")
+        self.assertEqual(hits[0].name, "@team/component")
 
     def test_keys_probe_first_nonempty_file(self) -> None:
         self.write("a.json", '{"dependencies": {}}')
-        self.write("b.json", '{"dependencies": {"pg": "16"}}')
+        self.write("b.json", '{"dependencies": {"store": "16"}}')
         probe = Probe("deps", ("a.json", "b.json"), "stack.tools", "json-keys:dependencies", None)
         hits, _ = run_probes(self.root, [probe])
-        self.assertEqual([(hit.name, hit.evidence) for hit in hits], [("pg", "b.json")])
+        self.assertEqual([(hit.name, hit.evidence) for hit in hits], [("store", "b.json")])
 
     def test_regex_probe_takes_first_group(self) -> None:
         self.write("VERSION", "release = 3.4.5\n")
@@ -580,13 +624,13 @@ class ProbeApplyTests(unittest.TestCase):
         result = apply_probe_hits(
             {},
             [
-                self.hit(field="stack.tools", value="16", name="pg"),
+                self.hit(field="stack.tools", value="16", name="store"),
                 self.hit(field="stack.tools", value=None, name="cache"),
             ],
         )
         self.assertEqual(
             [entry["name"] for entry in result["stack"]["tools"]],
-            ["pg", "cache"],
+            ["store", "cache"],
         )
         self.assertNotIn("version", result["stack"]["tools"][1])
 

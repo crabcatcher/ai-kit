@@ -59,6 +59,7 @@ class Probe:
     name: str | None
     provenance: str = "probe"
     version_required: bool = True
+    value_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -302,7 +303,7 @@ def parse_probes(entries: Any) -> list[Probe]:
         if not isinstance(entry, dict):
             errors.append((place, "ожидается объект"))
             continue
-        for key in sorted(set(entry) - {"id", "globs", "field", "extract", "name", "provenance", "version"}):
+        for key in sorted(set(entry) - {"id", "globs", "field", "extract", "name", "provenance", "version", "value_path"}):
             errors.append((f"{place}.{key}", "неизвестное поле"))
 
         probe_id = entry.get("id")
@@ -367,6 +368,13 @@ def parse_probes(entries: Any) -> list[Probe]:
         if extract == "none" and version != "none":
             errors.append((f"{place}.extract", "none допустим только при version = none"))
 
+        value_path = entry.get("value_path")
+        if value_path is not None:
+            if not keys:
+                errors.append((f"{place}.value_path", "value_path допустим только для json-keys/toml-keys"))
+            elif not isinstance(value_path, str) or EXTRACT_PATH.fullmatch(value_path) is None:
+                errors.append((f"{place}.value_path", "ожидается путь через точки"))
+
         if entry.get("provenance") != "probe":
             errors.append((f"{place}.provenance", "проба всегда даёт probe"))
 
@@ -379,6 +387,7 @@ def parse_probes(entries: Any) -> list[Probe]:
                     extract=extract,
                     name=name if isinstance(name, str) else None,
                     version_required=version != "none",
+                    value_path=value_path if isinstance(value_path, str) else None,
                 )
             )
 
@@ -459,6 +468,18 @@ def _version_value(value: Any) -> str | None:
     return None
 
 
+def _value_at(value: Any, path: str) -> Any:
+    node = value
+    for part in _path_parts(path):
+        if isinstance(node, list) and part.isdigit() and int(part) < len(node):
+            node = node[int(part)]
+        elif isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return ABSENT
+    return node
+
+
 def run_probes(root: Path, probes: list[Probe]) -> tuple[list[ProbeHit], list[ProbeMiss]]:
     hits: list[ProbeHit] = []
     misses: list[ProbeMiss] = []
@@ -503,7 +524,12 @@ def _run_probe(root: Path, probe: Probe) -> list[ProbeHit] | ProbeMiss:
                 for name in sorted(data):
                     if not name:
                         continue
-                    value = _version_value(data[name]) if probe.version_required else None
+                    raw = data[name]
+                    if probe.value_path:
+                        raw = _value_at(raw, probe.value_path)
+                        if raw is ABSENT:
+                            raw = None
+                    value = _version_value(raw) if probe.version_required else None
                     result.append(
                         ProbeHit(
                             probe_id=probe.id,

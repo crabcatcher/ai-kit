@@ -71,6 +71,45 @@ class InitTests(unittest.TestCase):
     def read(self, relative: str) -> str:
         return (self.target / relative).read_text(encoding="utf-8")
 
+    def write_feature(self, name: str, text: str) -> Path:
+        path = self.target / ".project" / "features" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"""# Функция
+
+## Назначение
+
+{text}
+
+## Логика
+
+Порядок действий.
+
+## Контракты
+
+| ID входа | Выход | Доступ | Кто вызывает |
+|---|---|---|---|
+<!-- adapter:contracts:begin -->
+<!-- adapter:contracts:end -->
+
+## Где в коде
+
+| Часть | Путь |
+|---|---|
+| — | — |
+
+## Нюансы
+
+Нет.
+
+## Что не разобрано
+
+Нет.
+""",
+            encoding="utf-8",
+        )
+        return path
+
     def test_profile_and_documents_are_written(self) -> None:
         report = generate(self.request())
         self.assertEqual(len(report.documents), 17)
@@ -156,6 +195,58 @@ class InitTests(unittest.TestCase):
         )
         generate(self.request(adapter=adapter))
         self.assertIn("нет автоматической проверки", self.read(".project/tech-debt.md"))
+
+    def test_adapter_inputs_seed_profile(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[inputs]]\nid = "health"\nkind = "http"\nlocator = "GET /health"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        data = tomllib.loads(self.read("profile.toml"))
+        self.assertEqual(
+            data["inputs"],
+            [{"id": "health", "kind": "http", "locator": "GET /health"}],
+        )
+
+    def test_adapter_inputs_conflict_with_profile(self) -> None:
+        profile = self.target / "profile.toml"
+        profile.write_text(
+            EXAMPLE.read_text(encoding="utf-8")
+            + '\n[[inputs]]\nid = "health"\nkind = "http"\nlocator = "GET /health"\n',
+            encoding="utf-8",
+        )
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[inputs]]\nid = "other"\nkind = "http"\nlocator = "GET /other"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(profile=profile, adapter=adapter))
+
+    def test_invalid_adapter_inputs_rejected(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[inputs]]\nid = "Bad"\nkind = "http"\nlocator = "GET /health"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
+    def test_refresh_keeps_profile_inputs(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[inputs]]\nid = "health"\nkind = "http"\nlocator = "GET /health"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        before = self.read("profile.toml")
+        adapter.write_text(
+            '[[inputs]]\nid = "other"\nkind = "http"\nlocator = "GET /other"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(refresh=True, profile=self.target / "profile.toml", adapter=adapter))
+        self.assertEqual(self.read("profile.toml"), before)
 
     def test_refresh_updates_generated_fragments_only(self) -> None:
         generate(self.request())
@@ -356,6 +447,156 @@ class InitTests(unittest.TestCase):
         )
         with self.assertRaises(TemplateError):
             generate(self.request(adapter=adapter))
+
+    def test_fragment_with_duplicate_table_header_is_rejected(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "architecture.md"\n'
+            'marker = "adapter:decisions"\n'
+            'content = "| Решение | Причина | Что отвергли |\\n|---|---|---|\\n| x | y | z |"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(TemplateError):
+            generate(self.request(adapter=adapter))
+
+    def test_fragment_marker_missing_in_manifest_is_rejected(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "architecture.md"\n'
+            'marker = "adapter:nope"\ncontent = "x"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
+    def test_feature_fragment_is_inserted(self) -> None:
+        feature = self.write_feature("login.md", "ручной текст")
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "features/login.md"\n'
+            'marker = "adapter:contracts"\ncontent = "| `health` | 200 | public | browser |"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        text = feature.read_text(encoding="utf-8")
+        self.assertIn("| `health` | 200 | public | browser |", text)
+        self.assertIn("ручной текст", text)
+
+    def test_feature_fragment_missing_file_is_error(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "features/missing.md"\n'
+            'marker = "adapter:contracts"\ncontent = "x"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
+    def test_feature_fragment_nested_path_rejected(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "features/sub/login.md"\n'
+            'marker = "adapter:contracts"\ncontent = "x"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
+    def test_feature_fragment_preserves_bom_and_crlf(self) -> None:
+        feature = self.write_feature("login.md", "ручной текст")
+        feature.write_bytes(
+            b"\xef\xbb\xbf"
+            + feature.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8")
+        )
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "features/login.md"\n'
+            'marker = "adapter:contracts"\ncontent = "| `health` | 200 | public | browser |"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        raw = feature.read_bytes()
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
+        self.assertIn(b"\r\n", raw)
+        self.assertIn("ручной текст".encode("utf-8"), raw)
+        self.assertIn("| `health` | 200 | public | browser |".encode("utf-8"), raw)
+
+    def test_feature_fragment_refresh_updates(self) -> None:
+        feature = self.write_feature("login.md", "ручной текст")
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "features/login.md"\n'
+            'marker = "adapter:contracts"\ncontent = "| `first` | 200 | public | browser |"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "features/login.md"\n'
+            'marker = "adapter:contracts"\ncontent = "| `second` | 200 | public | browser |"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(refresh=True, profile=self.target / "profile.toml", adapter=adapter))
+        text = feature.read_text(encoding="utf-8")
+        self.assertIn("`second`", text)
+        self.assertNotIn("`first`", text)
+
+    def test_feature_fragment_marker_missing_is_error(self) -> None:
+        feature = self.write_feature("login.md", "ручной текст")
+        feature.write_text(
+            feature.read_text(encoding="utf-8").replace(
+                "<!-- adapter:contracts:begin -->\n<!-- adapter:contracts:end -->",
+                "<!-- adapter:other:begin -->\n<!-- adapter:other:end -->",
+            ),
+            encoding="utf-8",
+        )
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "features/login.md"\n'
+            'marker = "adapter:contracts"\ncontent = "x"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(TemplateError):
+            generate(self.request(adapter=adapter))
+
+    def test_feature_duplicate_marker_is_error(self) -> None:
+        feature = self.write_feature("login.md", "ручной текст")
+        feature.write_text(
+            feature.read_text(encoding="utf-8").replace(
+                "<!-- adapter:contracts:end -->",
+                "<!-- adapter:contracts:end -->\n<!-- adapter:contracts:begin -->\n<!-- adapter:contracts:end -->",
+            ),
+            encoding="utf-8",
+        )
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "features/login.md"\n'
+            'marker = "adapter:contracts"\ncontent = "x"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(TemplateError):
+            generate(self.request(adapter=adapter))
+
+    def test_fragment_target_template_rejected(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "templates/feature.md"\n'
+            'marker = "adapter:contracts"\ncontent = "x"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
+    def test_feature_fragment_unchanged_not_reported(self) -> None:
+        self.write_feature("login.md", "ручной текст")
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "features/login.md"\n'
+            'marker = "adapter:contracts"\ncontent = "| `health` | 200 | public | browser |"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        report = generate(self.request(adapter=adapter))
+        self.assertNotIn(".project/features/login.md", report.overwritten)
 
     def test_adapter_commands_fill_missing_roles(self) -> None:
         data = apply_commands({"tests": {}}, {"commands": [{"role": "test", "command": "run-tests"}]})

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 
 from ai_kit import doctor, init, interview, profile, prompt, templates
+from ai_kit.console import configure_console
 
 COMMANDS = {
     "doctor": doctor.main,
@@ -23,6 +24,7 @@ USAGE = (
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_console()
     args = sys.argv[1:] if argv is None else argv
     if not args or args[0] in ("-h", "--help"):
         print(USAGE)

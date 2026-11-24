@@ -1,0 +1,11 @@
+{
+  "mutations": [
+    {"append": {"path": ".project/development.md", "text": "\nprod/<регион>, /Api/Db/<Сущность>/<Действие>, <https://example.com>.\n"}}
+  ],
+  "reject": [
+    {"code": "placeholder", "message": "<регион>"},
+    {"code": "placeholder", "message": "<Сущность>"},
+    {"code": "placeholder", "message": "<Действие>"}
+  ],
+  "exit": 0
+}

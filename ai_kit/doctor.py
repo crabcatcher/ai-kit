@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ai_kit import baseline, detect, gates, precommit, profile, rules, templates
+from ai_kit import baseline, detect, gates, inputs, precommit, profile, rules, templates
 from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.diagnostics import Diagnostic, Report
@@ -18,7 +18,7 @@ from ai_kit.toml_io import TomlError, load as load_toml
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
 FEATURE_LINK = re.compile(r"`([^`]+\.md)`")
 EMPTY_ADAPTER = re.compile(r"<!-- adapter:([a-z0-9-]+):begin -->\s*<!-- adapter:\1:end -->")
-PLACEHOLDER = re.compile(r"<[^<>\n]{1,40}>")
+PLACEHOLDER = re.compile(r"(?<![\w/])<[^<>\n]{1,40}>")
 FEATURE_SECTIONS = ("## Назначение", "## Логика", "## Контракты", "## Где в коде", "## Нюансы", "## Что не разобрано")
 CODE_PATH = re.compile(r"`([^`]+)`")
 EXTERNAL = ("http://", "https://", "mailto:", "tel:")
@@ -65,7 +65,9 @@ def run(request: DoctorRequest) -> Report:
         return Report(tuple(diagnostics))
 
     diagnostics.extend(_document_diagnostics(documents, raw, request))
+    diagnostics.extend(_unknowns_diagnostics(documents, raw, request))
     diagnostics.extend(_features_diagnostics(documents, request, parsed))
+    diagnostics.extend(_inputs_diagnostics(parsed, request))
     adapter_rules, rule_diagnostics = _adapter_rules(adapter)
     diagnostics.extend(rule_diagnostics)
     diagnostics.extend(_registry_diagnostics(documents, request, parsed, adapter_rules))
@@ -168,6 +170,49 @@ def _document_diagnostics(
     return diagnostics
 
 
+def _unknowns_diagnostics(
+    documents: list[templates.Document],
+    values: dict[str, Any],
+    request: DoctorRequest,
+) -> list[Diagnostic]:
+    fields: list[str] = []
+    for key in ("unknowns", "not_applicable"):
+        entries = values.get(key, [])
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("field"), str):
+                fields.append(entry["field"])
+    if not fields:
+        return []
+    document = next((item for item in documents if item.id == "architecture"), None)
+    if document is None:
+        return []
+    relative = templates.document_path(document, values)
+    path = _inside(request.root, relative)
+    if path is None or not path.is_file():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return []
+    missing = [
+        field
+        for field in dict.fromkeys(fields)
+        if re.search(rf"(?<![\w.\[]){re.escape(field)}(?![\w.\[])", text) is None
+    ]
+    if not missing:
+        return []
+    return [
+        Diagnostic(
+            "document",
+            "warning",
+            relative,
+            "поля профиля не видны в документе: " + ", ".join(missing),
+        )
+    ]
+
+
 def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
     visible = _visible_text(text)
@@ -187,7 +232,9 @@ def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
             diagnostics.append(
                 Diagnostic("adapter", "warning", relative, f"фрагмент adapter:{match.group(1)} не заполнен")
             )
-        for match in PLACEHOLDER.finditer(visible):
+        for match in PLACEHOLDER.finditer(_angle_text(text)):
+            if "://" in match.group(0):
+                continue
             diagnostics.append(
                 Diagnostic("placeholder", "warning", relative, f"незаполненная заглушка: {match.group(0)}")
             )
@@ -199,6 +246,10 @@ def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
 def _visible_text(text: str) -> str:
     visible = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
     return re.sub(r"```.*?```", "", visible, flags=re.DOTALL)
+
+
+def _angle_text(text: str) -> str:
+    return re.sub(r"`[^`\n]*`", "", _visible_text(text))
 
 
 def _link_diagnostics(text: str, path: Path, relative: str, root: Path) -> list[Diagnostic]:
@@ -335,47 +386,178 @@ def _features_diagnostics(
     folder = _inside(request.root, f"{parsed.docs.dir}/features")
     if folder is None or not folder.is_dir():
         return []
-    text = _document_text(documents, request, parsed, "features-index")
-    if text is None:
-        return []
+    index_text = _document_text(documents, request, parsed, "features-index")
     diagnostics: list[Diagnostic] = []
     listed: set[str] = set()
-    for line in text.splitlines():
-        if not line.strip().startswith("|"):
-            continue
-        for match in FEATURE_LINK.finditer(line):
-            relative = match.group(1)
-            listed.add(relative)
-            target = _inside(request.root, f"{parsed.docs.dir}/{relative}")
-            if target is None or not target.is_file():
-                diagnostics.append(
-                    Diagnostic("features", "error", "FEATURES.md", f"файла функции нет: {relative}")
-                )
+    if index_text is not None:
+        for line in index_text.splitlines():
+            if not line.strip().startswith("|"):
+                continue
+            for match in FEATURE_LINK.finditer(line):
+                relative = match.group(1)
+                listed.add(relative)
+                target = _inside(request.root, f"{parsed.docs.dir}/{relative}")
+                if target is None or not target.is_file():
+                    diagnostics.append(
+                        Diagnostic("features", "error", "FEATURES.md", f"файла функции нет: {relative}")
+                    )
     for path in sorted(folder.glob("*.md")):
         relative = f"features/{path.name}"
-        if relative not in listed:
+        if index_text is not None and relative not in listed:
             diagnostics.append(
                 Diagnostic("features", "error", "FEATURES.md", f"функция не внесена в карту: {relative}")
             )
         try:
-            text = path.read_text(encoding="utf-8-sig")
+            content = path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError) as error:
             diagnostics.append(
                 Diagnostic("features", "error", relative, f"файл функции не читается: {error}")
             )
             continue
         for section in FEATURE_SECTIONS:
-            if section not in text:
+            if section not in content:
                 diagnostics.append(
                     Diagnostic("features", "error", relative, f"нет обязательного раздела: {section[3:]}")
                 )
-        for code_path in _code_paths(text):
+        for error in templates.validate_markers(content):
+            diagnostics.append(Diagnostic("marker", "error", relative, error))
+        for empty in templates.empty_sections(content):
+            diagnostics.append(Diagnostic("section", "warning", relative, f"пустой раздел {empty}"))
+        for match in EMPTY_ADAPTER.finditer(content):
+            diagnostics.append(
+                Diagnostic("adapter", "warning", relative, f"фрагмент adapter:{match.group(1)} не заполнен")
+            )
+        for code_path in _code_paths(content):
             target = _inside(request.root, code_path)
             if target is None or not target.exists():
                 diagnostics.append(
                     Diagnostic("features", "warning", relative, f"путь кода не найден: {code_path}")
                 )
     return diagnostics
+
+
+def _inputs_diagnostics(parsed: profile.Profile, request: DoctorRequest) -> list[Diagnostic]:
+    if not parsed.inputs:
+        return []
+    folder = _inside(request.root, f"{parsed.docs.dir}/features")
+    if folder is None:
+        return [
+            Diagnostic(
+                "inputs",
+                "warning",
+                "features",
+                "каталог функций выходит за каталог проекта: покрытие не проверено",
+            )
+        ]
+    if not folder.is_dir() or not any(folder.glob("*.md")):
+        return [
+            Diagnostic(
+                "inputs",
+                "warning",
+                "features",
+                "файлов функций нет: покрытие входов не проверено",
+            )
+        ]
+    contracts: dict[str, set[str] | None] = {}
+    for path in sorted(folder.glob("*.md")):
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            continue
+        contracts[path.name] = _contract_ids(text)
+    if not any(ids is not None for ids in contracts.values()):
+        return []
+    diagnostics: list[Diagnostic] = []
+    if not any(contracts.values()):
+        diagnostics.append(
+            Diagnostic(
+                "inputs",
+                "warning",
+                "features",
+                "раздел «Контракты» есть, но id входов не распознаны: первая колонка должна быть id",
+            )
+        )
+    for entry in parsed.inputs:
+        covered = [
+            name for name, ids in contracts.items() if ids is not None and entry.id in ids
+        ]
+        if entry.feature:
+            name = entry.feature.split("/", 1)[1]
+            if name not in contracts:
+                diagnostics.append(
+                    Diagnostic(
+                        "inputs",
+                        "error",
+                        f"inputs/{entry.id}",
+                        f"файла функции нет: {entry.feature}",
+                    )
+                )
+            elif contracts[name] is None:
+                continue
+            elif entry.id not in contracts[name]:
+                diagnostics.append(
+                    Diagnostic(
+                        "inputs",
+                        "error",
+                        f"inputs/{entry.id}",
+                        f"вход не указан в «Контрактах» файла {name}",
+                    )
+                )
+            elif len(covered) > 1:
+                diagnostics.append(
+                    Diagnostic(
+                        "inputs",
+                        "error",
+                        f"inputs/{entry.id}",
+                        "вход покрыт в нескольких файлах: " + ", ".join(covered),
+                    )
+                )
+            continue
+        if not covered:
+            diagnostics.append(
+                Diagnostic(
+                    "inputs",
+                    "error",
+                    f"inputs/{entry.id}",
+                    "вход не покрыт ни одним файлом функции",
+                )
+            )
+        elif len(covered) > 1:
+            diagnostics.append(
+                Diagnostic(
+                    "inputs",
+                    "error",
+                    f"inputs/{entry.id}",
+                    "вход покрыт в нескольких файлах: " + ", ".join(covered),
+                )
+            )
+    return diagnostics
+
+
+def _contract_ids(text: str) -> set[str] | None:
+    visible = _visible_text(text)
+    if "## Контракты" not in visible:
+        return None
+    section = _section_text(visible, "## Контракты")
+    result: set[str] = set()
+    for line in section.splitlines():
+        if not line.strip().startswith("|") or _is_separator(line):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not cells:
+            continue
+        value = cells[0].strip().strip("`").strip()
+        if inputs.ID.fullmatch(value):
+            result.add(value)
+    return result
+
+
+def _section_text(text: str, heading: str) -> str:
+    start = text.find(heading)
+    if start < 0:
+        return ""
+    end = text.find("\n## ", start + 1)
+    return text[start:] if end < 0 else text[start:end]
 
 
 def _code_paths(text: str) -> list[str]:

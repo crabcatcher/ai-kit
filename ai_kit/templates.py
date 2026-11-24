@@ -432,35 +432,69 @@ def _truthy(value: Any) -> bool:
 
 
 def _insert_fragments(text: str, context: RenderContext) -> str:
-    for key, fragment in context.fragments.items():
+    return fill_fragments(
+        text,
+        context.fragments,
+        where=document_path(context.document, context.values),
+    )
+
+
+def fill_fragments(
+    text: str,
+    fragments: dict[str, str],
+    *,
+    where: str,
+    newline: str = "\n",
+) -> str:
+    problems = validate_markers(text)
+    if problems:
+        raise TemplateError([f"{where}: {problem}" for problem in problems])
+    for key, fragment in fragments.items():
         kind, _, name = key.partition(":")
         if kind not in ("adapter", "generated") or not FRAGMENT_NAME.fullmatch(name):
-            raise TemplateError([f"фрагмент {key}: ожидается adapter:<имя> или generated:<имя>"])
-        _validate_fragment(key, fragment)
+            raise TemplateError([f"{where}: фрагмент {key}: ожидается adapter:<имя> или generated:<имя>"])
+        _validate_fragment(key, fragment, where)
         pattern = re.compile(
             rf"(<!-- {kind}:{re.escape(name)}:begin -->)\n?(.*?)(<!-- {kind}:{re.escape(name)}:end -->)",
             re.DOTALL,
         )
-        if pattern.search(text) is None:
-            raise TemplateError([f"фрагмент {key}: маркера нет в шаблоне"])
-        body = fragment.strip()
+        match = pattern.search(text)
+        if match is None:
+            raise TemplateError([f"{where}: фрагмент {key}: маркера нет в файле"])
+        body = fragment.strip().replace("\r\n", "\n").replace("\n", newline)
+        if _table_starts(body) and _table_ends(text[: match.start()]):
+            raise TemplateError([f"{where}: фрагмент {key}: шапка таблицы уже есть"])
         begin = f"<!-- {kind}:{name}:begin -->"
         end = f"<!-- {kind}:{name}:end -->"
-        replacement = f"{begin}\n{body}\n{end}" if body else f"{begin}\n{end}"
+        replacement = f"{begin}{newline}{body}{newline}{end}" if body else f"{begin}{newline}{end}"
         text = pattern.sub(lambda _: replacement, text, count=1)
     return text
 
 
-def _validate_fragment(key: str, fragment: str) -> None:
+def _table_starts(text: str) -> bool:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return len(lines) >= 2 and lines[0].startswith("|") and _is_table_separator(lines[1])
+
+
+def _table_ends(text: str) -> bool:
+    lines = text.splitlines()
+    return (
+        len(lines) >= 2
+        and lines[-2].strip().startswith("|")
+        and _is_table_separator(lines[-1].strip())
+    )
+
+
+def _validate_fragment(key: str, fragment: str, where: str) -> None:
     errors: list[str] = []
     for line in fragment.splitlines():
         stripped = line.strip()
         if re.match(r"^#{1,6}\s", stripped):
-            errors.append(f"{key}: заголовок внутри фрагмента — заголовки принадлежат шаблону")
+            errors.append(f"{where}: фрагмент {key}: заголовок внутри фрагмента — заголовки принадлежат шаблону")
         if MARKER.match(stripped):
-            errors.append(f"{key}: маркер внутри фрагмента")
+            errors.append(f"{where}: фрагмент {key}: маркер внутри фрагмента")
         if "{{" in stripped:
-            errors.append(f"{key}: подстановки внутри фрагмента не выполняются")
+            errors.append(f"{where}: фрагмент {key}: подстановки внутри фрагмента не выполняются")
     if errors:
         raise TemplateError(errors)
 

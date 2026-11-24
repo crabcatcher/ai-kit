@@ -1,0 +1,9 @@
+{
+  "mutations": [
+    {"replace": {"path": ".project/architecture.md", "old": "stack.stores[0].version", "new": "скрыто"}}
+  ],
+  "expect": [
+    {"code": "document", "severity": "warning", "path": "architecture.md", "message": "stack.stores[0].version"}
+  ],
+  "exit": 0
+}

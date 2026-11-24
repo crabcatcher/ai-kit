@@ -69,6 +69,7 @@ class Plan:
     generated: dict[str, list[rules.Rule]]
     baseline: list[baseline.Violation]
     features: list[tuple[str, str]]
+    gaps: list[dict[str, str]]
 
 
 def generate(request: Request) -> Report:
@@ -179,6 +180,7 @@ def _plan(
         },
         baseline=items,
         features=_feature_rows(request.target, data),
+        gaps=_gap_rows(adapter),
     )
 
 
@@ -381,6 +383,7 @@ def _document_fragments(
         "rules": lambda: _bullets(rows),
         "baseline": lambda: _baseline_table(plan.baseline),
         "features": lambda: _features_table(plan.features),
+        "gaps": lambda: _gaps_table(plan.gaps),
     }
     for name in templates.marker_names(source, "generated"):
         provider = providers.get(name)
@@ -447,6 +450,33 @@ def _feature_rows(target: Path, values: dict[str, Any]) -> list[tuple[str, str]]
 
 def _features_table(rows: list[tuple[str, str]]) -> str:
     return "\n".join(f"| {_cell(title)} | `{_cell(path)}` |" for title, path in rows)
+
+
+def _gap_rows(adapter: dict[str, Any]) -> list[dict[str, str]]:
+    entries = adapter.get("gaps", [])
+    if not isinstance(entries, list):
+        raise InitError("gaps: ожидается список")
+    rows: list[dict[str, str]] = []
+    for position, entry in enumerate(entries):
+        place = f"gaps[{position}]"
+        if not isinstance(entry, dict):
+            raise InitError(f"{place}: ожидается объект")
+        extra = set(entry) - {"id", "reason", "owner", "trigger"}
+        if extra:
+            raise InitError(f"{place}: неизвестные поля: {', '.join(sorted(extra))}")
+        for key in ("id", "reason", "owner", "trigger"):
+            value = entry.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise InitError(f"{place}.{key}: ожидается непустая строка")
+        rows.append(entry)
+    return rows
+
+
+def _gaps_table(rows: list[dict[str, str]]) -> str:
+    return "\n".join(
+        f"| {_cell(row['id'])} | {_cell(row['reason'])} | {_cell(row['owner'])} | {_cell(row['trigger'])} |"
+        for row in rows
+    )
 
 
 def _baseline_table(rows: list[baseline.Violation]) -> str:

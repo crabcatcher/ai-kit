@@ -600,6 +600,7 @@ def parse_answers(data: dict[str, Any]) -> list[Answer]:
     errors: list[tuple[str, str]] = []
     answers: list[Answer] = []
     seen_slots: set[str] = set()
+    seen_facts: set[tuple[str, str]] = set()
     for index, entry in enumerate(entries):
         place = f"answer[{index}]"
         if not isinstance(entry, dict):
@@ -609,6 +610,7 @@ def parse_answers(data: dict[str, Any]) -> list[Answer]:
             errors.append((f"{place}.{key}", "неизвестное поле"))
 
         slot = entry.get("slot")
+        name = entry.get("name")
         node = None
         if not isinstance(slot, str) or not slot:
             errors.append((f"{place}.slot", "ожидается непустой путь"))
@@ -618,15 +620,24 @@ def parse_answers(data: dict[str, Any]) -> list[Answer]:
             if node is None:
                 errors.append((f"{place}.slot", "поля нет в схеме профиля"))
             if slot in seen_slots:
-                errors.append((f"{place}.slot", "слот отвечен дважды"))
+                allowed = (
+                    schema.is_evidence(node)
+                    and entry.get("status", "answered") == "answered"
+                    and isinstance(name, str)
+                    and bool(name.strip())
+                    and (slot, name) not in seen_facts
+                )
+                if not allowed:
+                    errors.append((f"{place}.slot", "слот отвечен дважды"))
             seen_slots.add(slot)
+            if schema.is_evidence(node) and isinstance(name, str) and name.strip():
+                seen_facts.add((slot, name))
 
         status = entry.get("status", "answered")
         if status not in ANSWER_STATUSES:
             errors.append((f"{place}.status", f"ожидается {', '.join(ANSWER_STATUSES)}"))
             status = "answered"
 
-        name = entry.get("name")
         version = entry.get("version")
         if status == "unknown":
             if "value" in entry or name is not None or version is not None:
@@ -683,17 +694,25 @@ def apply_answers(
         question = slot_question.get(answer.slot)
         if question is None:
             raise InterviewError([(answer.slot, "слот не задан ни одним вопросом банка")])
-        if is_known(result, answer.slot):
-            ignored += 1
-            continue
+        node = schema.resolve(answer.slot)
+        if node is None:
+            raise InterviewError([(answer.slot, "поля нет в схеме профиля")])
+        evidence = schema.is_evidence(node)
+        known = is_known(result, answer.slot)
+        if known:
+            names = []
+            if evidence and answer.status == "answered" and answer.name:
+                current = _get_slot(result, answer.slot)
+                if isinstance(current, list):
+                    names = [item.get("name") for item in current if isinstance(item, dict)]
+            if not evidence or answer.status != "answered" or answer.name in names:
+                ignored += 1
+                continue
         if answer.status == "unknown":
             unknowns.append({"field": answer.slot, "question": question.text})
             continue
 
-        node = schema.resolve(answer.slot)
-        if node is None:
-            raise InterviewError([(answer.slot, "поля нет в схеме профиля")])
-        if schema.is_evidence(node):
+        if evidence:
             if not answer.name:
                 raise InterviewError([(answer.slot, "для поля-доказательства нужно имя факта")])
             _append_evidence(result, answer.slot, {"name": answer.name, "provenance": "answer"})

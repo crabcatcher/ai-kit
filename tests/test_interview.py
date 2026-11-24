@@ -361,6 +361,31 @@ class AnswerTests(unittest.TestCase):
         with self.assertRaises(InterviewError):
             apply_answers({}, [item], [item], [Answer("stack.runtime")])
 
+    def test_multiple_evidence_answers(self) -> None:
+        item = question(id="stores", slots=("stack.stores",))
+        parsed = parse_answers(
+            {
+                "answer": [
+                    {"slot": "stack.stores", "name": "first"},
+                    {"slot": "stack.stores", "name": "second"},
+                ]
+            }
+        )
+        values, _, stats = apply_answers({}, [item], [item], parsed)
+        self.assertEqual([entry["name"] for entry in values["stack"]["stores"]], ["first", "second"])
+        self.assertEqual(stats.answered, 2)
+
+    def test_duplicate_evidence_name_rejected(self) -> None:
+        with self.assertRaises(InterviewError):
+            parse_answers(
+                {
+                    "answer": [
+                        {"slot": "stack.stores", "name": "same"},
+                        {"slot": "stack.stores", "name": "same"},
+                    ]
+                }
+            )
+
     def test_evidence_answer_without_version_requests_proof(self) -> None:
         item = question(id="runtime", slots=("stack.runtime",))
         _, unknowns, _ = apply_answers({}, [item], [item], [Answer("stack.runtime", name="runtime")])

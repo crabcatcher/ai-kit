@@ -147,6 +147,16 @@ class InitTests(unittest.TestCase):
         generate(self.request())
         self.assertIn("| Вход | `features/login.md` |", self.read(".project/FEATURES.md"))
 
+    def test_adapter_gaps_are_rendered_in_debt(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[gaps]]\nid = "manual"\nreason = "нет автоматической проверки"\n'
+            'owner = "владелец"\ntrigger = "появление проверки"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        self.assertIn("нет автоматической проверки", self.read(".project/tech-debt.md"))
+
     def test_refresh_updates_generated_fragments_only(self) -> None:
         generate(self.request())
         profile_before = self.read("profile.toml")

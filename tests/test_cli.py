@@ -5,9 +5,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from ai_kit import cli, doctor, init, interview, profile, prompt, templates
+from ai_kit import adapter, cli, doctor, init, interview, profile, prompt, templates
 
-MODULES = (doctor, init, interview, profile, prompt, templates)
+MODULES = (adapter, doctor, init, interview, profile, prompt, templates)
 
 
 class CliFlagTests(unittest.TestCase):

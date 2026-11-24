@@ -97,6 +97,7 @@ python -m ai_kit.prompt
 | [ai_kit/interview.py](./ai_kit/interview.py) | банк и дедупликация, пробы, ответы, неизвестное, отчёт, JSON-план |
 | [ai_kit/ask.py](./ai_kit/ask.py) | консольный опрос по слотам и подтверждение записи |
 | [ai_kit/init.py](./ai_kit/init.py) | генератор: профиль, документы, фрагменты, правила |
+| [ai_kit/adapter.py](./ai_kit/adapter.py) | проверка адаптера до генерации |
 | [ai_kit/inputs.py](./ai_kit/inputs.py) | публичные входы: форма, канонизация и перенос в профиль |
 | [ai_kit/rules.py](./ai_kit/rules.py) | строки реестра, метки, загрузка канона |
 | [ai_kit/gaps.py](./ai_kit/gaps.py) | заявленные пробелы адаптера: форма и загрузка |
@@ -119,6 +120,7 @@ python -m ai_kit.prompt
 | [tests/test_schema_consistency.py](./tests/test_schema_consistency.py) | известные расхождения схемы и валидатора |
 | [tests/test_interview.py](./tests/test_interview.py) | тесты вопросов, проб, ответов и отчёта |
 | [tests/test_init.py](./tests/test_init.py) | тесты генерации, сохранения фрагментов и профиля |
+| [tests/test_adapter.py](./tests/test_adapter.py) | проверка адаптера: секции, ссылки, фрагменты |
 | [tests/test_inputs.py](./tests/test_inputs.py) | форма входов, канонизация и перенос в профиль |
 | [tests/test_doctor.py](./tests/test_doctor.py) | тесты встроенных проверок и гейтов |
 | [tests/test_gaps.py](./tests/test_gaps.py) | форма заявленных пробелов и дубли id |
@@ -138,6 +140,7 @@ python -m ai_kit.profile --print-schema
 python -m ai_kit.templates --check
 python -m ai_kit.templates --render readme --profile profiles/example.toml
 python -m ai_kit.interview --check --adapter tests/fixtures/adapter/adapter.toml
+python -m ai_kit.adapter validate --adapter tests/fixtures/adapter/adapter.toml --profile profiles/example.toml
 python -m ai_kit.interview --plan --profile profiles/example.toml --adapter tests/fixtures/adapter/adapter.toml
 python -m ai_kit.init --profile profiles/example.toml --adapter tests/fixtures/adapter/adapter.toml --dry-run
 ```

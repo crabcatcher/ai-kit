@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import sys
 
-from ai_kit import doctor, init, interview, profile, prompt, templates
+from ai_kit import adapter, doctor, init, interview, profile, prompt, templates
 from ai_kit.console import configure_console
 
 COMMANDS = {
+    "adapter": adapter.main,
     "doctor": doctor.main,
     "init": init.main,
     "interview": interview.main,
@@ -18,7 +19,7 @@ COMMANDS = {
 
 USAGE = (
     "ai-kit <команда> [параметры]\n"
-    "Команды: doctor, init, interview, profile, prompt, templates.\n"
+    "Команды: adapter, doctor, init, interview, profile, prompt, templates.\n"
     "Параметры команды: ai-kit <команда> --help"
 )
 

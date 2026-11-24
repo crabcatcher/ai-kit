@@ -572,49 +572,89 @@ def _stale_diagnostics(
         probes = interview.load_probes(adapter)
     except interview.InterviewError as error:
         return [Diagnostic("adapter", "error", "probes", str(error))]
-    other_fields = {
+
+    keys_fields = {
+        probe.field
+        for probe in probes
+        if probe.extract.split(":", 1)[0] in ("json-keys", "toml-keys")
+    }
+    normal_fields = {
         probe.field
         for probe in probes
         if probe.extract.split(":", 1)[0] not in ("json-keys", "toml-keys")
     }
-    keys_probes = [
-        probe
-        for probe in probes
-        if probe.extract.split(":", 1)[0] in ("json-keys", "toml-keys")
-        and probe.field not in other_fields
-    ]
-    if not keys_probes:
+    ambiguous = keys_fields & normal_fields
+    keys_probes = [probe for probe in probes if probe.field in keys_fields and probe.field not in ambiguous]
+    normal_probes = [probe for probe in probes if probe.field not in keys_fields]
+    if not keys_probes and not normal_probes:
         return []
-    hits, misses = interview.run_probes(request.root, keys_probes)
-    hit_names: dict[str, set[str]] = {}
-    for hit in hits:
-        hit_names.setdefault(hit.probe_id, set()).add(hit.name or "")
-    miss_reasons = {miss.probe_id: miss.reason for miss in misses}
+
     diagnostics: list[Diagnostic] = []
-    for probe in keys_probes:
-        names = _stack_names(parsed, probe.field)
-        if probe.id in miss_reasons:
-            if names:
+    if keys_probes:
+        hits, misses = interview.run_probes(request.root, keys_probes)
+        hit_names: dict[str, set[str]] = {}
+        for hit in hits:
+            hit_names.setdefault(hit.probe_id, set()).add(hit.name or "")
+        miss_reasons = {miss.probe_id: miss.reason for miss in misses}
+        for probe in keys_probes:
+            names = _stack_names(parsed, probe.field)
+            if probe.id in miss_reasons:
+                if names:
+                    diagnostics.append(
+                        Diagnostic(
+                            "stale",
+                            "warning",
+                            probe.field,
+                            f"проба {probe.id} не нашла значение ({miss_reasons[probe.id]}); "
+                            "старые факты поля не подтверждены: " + ", ".join(sorted(names)),
+                        )
+                    )
+                continue
+            stale = names - hit_names.get(probe.id, set())
+            if stale:
                 diagnostics.append(
                     Diagnostic(
                         "stale",
                         "warning",
                         probe.field,
-                        f"проба {probe.id} не нашла значение ({miss_reasons[probe.id]}); "
-                        "старые факты поля не подтверждены: " + ", ".join(sorted(names)),
+                        f"проба {probe.id} не подтвердила: " + ", ".join(sorted(stale)),
                     )
                 )
-            continue
-        stale = names - hit_names.get(probe.id, set())
-        if stale:
-            diagnostics.append(
-                Diagnostic(
-                    "stale",
-                    "warning",
-                    probe.field,
-                    f"проба {probe.id} не подтвердила: " + ", ".join(sorted(stale)),
+
+    if normal_probes:
+        hits, misses = interview.run_probes(request.root, normal_probes)
+        names_by_field: dict[str, set[str]] = {}
+        for hit in hits:
+            if hit.name:
+                names_by_field.setdefault(hit.field, set()).add(hit.name)
+        reasons_by_field: dict[str, list[str]] = {}
+        for miss in misses:
+            reasons_by_field.setdefault(miss.field, []).append(miss.reason)
+        for field in sorted(normal_fields - keys_fields):
+            names = _stack_names(parsed, field)
+            if not names:
+                continue
+            confirmed = names_by_field.get(field, set())
+            stale = names - confirmed
+            if confirmed and stale:
+                diagnostics.append(
+                    Diagnostic(
+                        "stale",
+                        "warning",
+                        field,
+                        "проба не подтвердила: " + ", ".join(sorted(stale)),
+                    )
                 )
-            )
+            elif not confirmed and reasons_by_field.get(field):
+                diagnostics.append(
+                    Diagnostic(
+                        "stale",
+                        "warning",
+                        field,
+                        "проба не нашла значение; старые факты поля не подтверждены: "
+                        + ", ".join(sorted(names)),
+                    )
+                )
     return diagnostics
 
 

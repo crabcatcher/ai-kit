@@ -22,6 +22,7 @@ python -m unittest discover -s tests -p "test_*.py"
 python -m ai_kit.profile --check profiles/example.toml
 python -m ai_kit.templates --check
 python -m ai_kit.interview --check --adapter tests/fixtures/adapter/adapter.toml
+python -m ai_kit.adapter validate --adapter tests/fixtures/adapter/adapter.toml --profile profiles/example.toml
 python -m ai_kit.init --profile profiles/example.toml --adapter tests/fixtures/adapter/adapter.toml --dry-run
 ```
 

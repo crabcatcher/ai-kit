@@ -185,7 +185,7 @@ def _plan(
     return Plan(
         documents=documents,
         values=data,
-        fragments=_index_adapter_fragments(documents, data, adapter, request),
+        fragments=index_adapter_fragments(documents, data, adapter, request),
         generated={
             "canon": _canon_rules(request.kit_root),
             "adapter": _adapter_rules(adapter),
@@ -322,7 +322,7 @@ def _adapter_rules(adapter: dict[str, Any]) -> list[rules.Rule]:
     return rules.build_rules(entries)
 
 
-def _index_adapter_fragments(
+def index_adapter_fragments(
     documents: list[templates.Document],
     values: dict[str, Any],
     adapter: dict[str, Any],
@@ -340,7 +340,7 @@ def _index_adapter_fragments(
             raise InitError(f"{place}: неизвестные поля: {', '.join(sorted(extra))}")
         target = entry.get("target")
         marker = entry.get("marker")
-        content = _fragment_content(entry, place, request)
+        content = fragment_content(entry, place, request)
         if not isinstance(target, str) or not target:
             raise InitError(f"{place}.target: ожидается непустая строка")
         if not isinstance(marker, str) or FRAGMENT_MARKER.fullmatch(marker) is None:
@@ -366,7 +366,7 @@ def _index_adapter_fragments(
             if name not in templates.marker_names(source, "adapter"):
                 raise InitError(f"{place}.marker: маркера {marker} нет в шаблоне {document.template}")
         else:
-            relative = _feature_target(target, place, values, request)
+            relative = feature_target(target, place, values, request)
             if relative is None:
                 raise InitError(f"{place}.target: {target} не указывает ровно один документ")
         bucket = index.setdefault(relative, {})
@@ -376,7 +376,7 @@ def _index_adapter_fragments(
     return index
 
 
-def _feature_target(
+def feature_target(
     target: str,
     place: str,
     values: dict[str, Any],
@@ -402,7 +402,7 @@ def _feature_target(
     return relative
 
 
-def _fragment_content(entry: dict[str, Any], place: str, request: Request) -> str:
+def fragment_content(entry: dict[str, Any], place: str, request: Request) -> str:
     has_content = "content" in entry
     has_file = "content_file" in entry
     if has_content == has_file:

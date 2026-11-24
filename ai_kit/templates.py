@@ -453,7 +453,7 @@ def fill_fragments(
         kind, _, name = key.partition(":")
         if kind not in ("adapter", "generated") or not FRAGMENT_NAME.fullmatch(name):
             raise TemplateError([f"{where}: фрагмент {key}: ожидается adapter:<имя> или generated:<имя>"])
-        _validate_fragment(key, fragment, where)
+        validate_fragment(key, fragment, where)
         pattern = re.compile(
             rf"(<!-- {kind}:{re.escape(name)}:begin -->)\n?(.*?)(<!-- {kind}:{re.escape(name)}:end -->)",
             re.DOTALL,
@@ -485,7 +485,7 @@ def _table_ends(text: str) -> bool:
     )
 
 
-def _validate_fragment(key: str, fragment: str, where: str) -> None:
+def validate_fragment(key: str, fragment: str, where: str) -> None:
     errors: list[str] = []
     for line in fragment.splitlines():
         stripped = line.strip()

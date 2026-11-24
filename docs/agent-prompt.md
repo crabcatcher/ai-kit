@@ -55,7 +55,7 @@
 - профиль после генерации — `.ai/source/profile.toml`, он тоже отслеживается.
 Если `docs.dir` отличается от `.ai`, замени `.ai/source` на `<docs.dir>/source`.
 Проверь адаптер:
-  ai-kit interview --check --adapter .ai/source/adapter.toml
+  ai-kit adapter validate --adapter .ai/source/adapter.toml --profile .pilot/base.toml --probes
 
 4. Интервью.
 Получи машиночитаемый батч для себя:

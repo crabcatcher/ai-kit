@@ -633,7 +633,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = normalize(sys.argv[1:] if argv is None else argv)
     try:
-        ensure_known(args, {"--check", "--print-schema", "--help"})
+        ensure_known(args, {"--check", "--print-schema", "--help"}, {"--check"})
     except UsageError as error:
         print(f"{error}\nИспользование: python -m ai_kit.profile --help", file=sys.stderr)
         return 2
@@ -645,7 +645,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if "--check" in args:
         index = args.index("--check")
-        if index + 1 >= len(args) or args[index + 1].startswith("-"):
+        if index + 1 >= len(args) or args[index + 1] in {"--check", "--print-schema", "--help"}:
             print("--check требует путь к профилю", file=sys.stderr)
             return 2
         try:

@@ -1,9 +1,12 @@
 import copy
+import io
+import os
 import posixpath
 import re
 import tempfile
 import tomllib
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from ai_kit.templates import (
@@ -17,6 +20,7 @@ from ai_kit.templates import (
     render_document,
     validate_documents,
     validate_template,
+    main as templates_main,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +60,33 @@ class ManifestTests(unittest.TestCase):
     def test_manifest_is_valid(self) -> None:
         self.assertEqual(validate_documents(ROOT, DOCUMENTS), [])
         self.assertEqual(len(DOCUMENTS), 17)
+
+    def test_check_works_from_other_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            previous = os.getcwd()
+            os.chdir(temporary)
+            try:
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(templates_main(["--check"]), 0)
+            finally:
+                os.chdir(previous)
+
+    def test_render_works_from_other_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            previous = os.getcwd()
+            os.chdir(temporary)
+            try:
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(
+                        templates_main(
+                            ["--render", "architecture", "--profile", str(ROOT / "profiles" / "example.toml")]
+                        ),
+                        0,
+                    )
+                self.assertIn("# Архитектура", output.getvalue())
+            finally:
+                os.chdir(previous)
 
     def test_paths_are_unique(self) -> None:
         paths = [document_path(item, profile()) for item in DOCUMENTS]

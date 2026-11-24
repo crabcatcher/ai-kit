@@ -1173,6 +1173,7 @@ def main(argv: list[str] | None = None) -> int:
         ensure_known(
             args,
             {"--check", "--plan", "--report", "--json", "--profile", "--adapter", "--answers", "--project", "--help"},
+            {"--profile", "--adapter", "--answers", "--project"},
         )
     except UsageError as error:
         print(f"{error}\nИспользование: python -m ai_kit.interview --help", file=sys.stderr)

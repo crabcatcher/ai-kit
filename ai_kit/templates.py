@@ -568,7 +568,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = normalize(sys.argv[1:] if argv is None else argv)
     try:
-        ensure_known(args, {"--check", "--render", "--profile", "--help"})
+        ensure_known(args, {"--check", "--render", "--profile", "--help"}, {"--render", "--profile"})
     except UsageError as error:
         print(f"{error}\nИспользование: python -m ai_kit.templates --help", file=sys.stderr)
         return 2

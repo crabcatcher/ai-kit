@@ -99,6 +99,7 @@ python -m ai_kit.prompt
 | [ai_kit/init.py](./ai_kit/init.py) | генератор: профиль, документы, фрагменты, правила |
 | [ai_kit/inputs.py](./ai_kit/inputs.py) | публичные входы: форма, канонизация и перенос в профиль |
 | [ai_kit/rules.py](./ai_kit/rules.py) | строки реестра, метки, загрузка канона |
+| [ai_kit/gaps.py](./ai_kit/gaps.py) | заявленные пробелы адаптера: форма и загрузка |
 | [ai_kit/baseline.py](./ai_kit/baseline.py) | принятые нарушения правил: формат и проверки |
 | [ai_kit/precommit.py](./ai_kit/precommit.py) | скрипт и хук проверки перед коммитом |
 | [ai_kit/doctor.py](./ai_kit/doctor.py) | встроенные проверки и запуск гейтов |
@@ -110,6 +111,7 @@ python -m ai_kit.prompt
 | [ai_kit/args.py](./ai_kit/args.py) | строгая проверка флагов и `--opt=value` |
 | [ai_kit/paths.py](./ai_kit/paths.py) | ресурсы и сообщение про editable-установку |
 | [tests/test_cli.py](./tests/test_cli.py) | неизвестные флаги и `--help` |
+| [tests/test_args.py](./tests/test_args.py) | значения с ведущим `-` и строгая проверка флагов |
 | [tests/test_reliability.py](./tests/test_reliability.py) | атомарная запись, baseline, JSON-ошибки |
 | [tests/test_paths.py](./tests/test_paths.py) | отсутствие ресурсов установленного пакета |
 | [tests/test_toml_io.py](./tests/test_toml_io.py) | BOM и невалидный UTF-8 |
@@ -119,6 +121,7 @@ python -m ai_kit.prompt
 | [tests/test_init.py](./tests/test_init.py) | тесты генерации, сохранения фрагментов и профиля |
 | [tests/test_inputs.py](./tests/test_inputs.py) | форма входов, канонизация и перенос в профиль |
 | [tests/test_doctor.py](./tests/test_doctor.py) | тесты встроенных проверок и гейтов |
+| [tests/test_gaps.py](./tests/test_gaps.py) | форма заявленных пробелов и дубли id |
 | [tests/conformance/](./tests/conformance) | корпус фикстур: дефект и ожидаемый диагноз |
 | [templates/](./templates) | 17 шаблонов документов: архитектура, реестр, маршрут, функции, долг, план дозаполнения |
 | [documents.toml](./documents.toml) | манифест 17 документов: шаблон, путь, назначение |

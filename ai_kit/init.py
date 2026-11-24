@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_kit import ask as prompt
-from ai_kit import baseline, detect, inputs, interview, precommit, profile, rules, templates, toml_writer
+from ai_kit import baseline, detect, gaps, inputs, interview, precommit, profile, rules, templates, toml_writer
 from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.paths import KitRootError, kit_root
@@ -60,6 +60,7 @@ class Report:
     baseline: str | None = None
     precommit: tuple[str, ...] = ()
     overwritten: tuple[str, ...] = ()
+    features: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,7 @@ class Plan:
     generated: dict[str, list[rules.Rule]]
     baseline: list[baseline.Violation]
     features: list[tuple[str, str]]
-    gaps: list[dict[str, str]]
+    gaps: list[gaps.Gap]
 
 
 def generate(request: Request) -> Report:
@@ -97,12 +98,15 @@ def generate(request: Request) -> Report:
     profile_text = toml_writer.dumps(data)
     artifacts = _artifacts(data, parsed, request)
     outputs = _render_all(plan, request)
+    documents, features = _split_outputs(plan, outputs, request.target)
     profile_path = _safe_path(request.target, request.write_profile, "профиль")
     overwritten = _overwritten(request.target, [(profile_path, profile_text), *outputs, *artifacts])
 
     if request.ask and not request.yes:
         print(f"Профиль: {_display(request.target, profile_path)}")
-        print(f"Документов: {len(outputs)}")
+        print(f"Документов: {len(documents)}")
+        if features:
+            print(f"Файлов функций: {len(features)}")
         if artifacts:
             print(f"Артефактов: {len(artifacts)}")
         if overwritten:
@@ -110,7 +114,8 @@ def generate(request: Request) -> Report:
         if not prompt.confirm():
             return Report(
                 profile=_display(request.target, profile_path),
-                documents=tuple(_display(request.target, path) for path, _ in outputs),
+                documents=documents,
+                features=features,
                 unknowns=len(data.get("unknowns", [])),
                 dry_run=True,
                 cancelled=True,
@@ -124,7 +129,8 @@ def generate(request: Request) -> Report:
 
     return Report(
         profile=_display(request.target, profile_path),
-        documents=tuple(_display(request.target, path) for path, _ in outputs),
+        documents=documents,
+        features=features,
         unknowns=len(data.get("unknowns", [])),
         dry_run=request.dry_run,
         baseline=_display(request.target, plan_baseline_path(request))
@@ -147,13 +153,15 @@ def _refresh(request: Request) -> Report:
 
     plan = _plan(request, data, parsed, adapter)
     outputs = _render_all(plan, request)
+    documents, features = _split_outputs(plan, outputs, request.target)
     profile_path = request.profile
     overwritten = _overwritten(request.target, outputs)
     if not request.dry_run:
         _write_all(outputs)
     return Report(
         profile=_display(request.target, profile_path),
-        documents=tuple(_display(request.target, path) for path, _ in outputs),
+        documents=documents,
+        features=features,
         unknowns=len(data.get("unknowns", [])),
         dry_run=request.dry_run,
         baseline=_display(request.target, plan_baseline_path(request))
@@ -434,6 +442,21 @@ def _relative_to_docs(path: str, values: dict[str, Any]) -> str:
     return path[len(prefix):] if path.startswith(prefix) else path
 
 
+def _split_outputs(
+    plan: Plan,
+    outputs: list[tuple[Path, str]],
+    target: Path,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    documents = {templates.document_path(document, plan.values) for document in plan.documents}
+    document_paths = [
+        _display(target, path)
+        for path, _ in outputs
+        if _display(target, path) in documents
+    ]
+    feature_paths = sorted(set(plan.fragments) - documents)
+    return tuple(document_paths), tuple(feature_paths)
+
+
 def _render_all(plan: Plan, request: Request) -> list[tuple[Path, str]]:
     outputs: list[tuple[Path, str]] = []
     rendered: set[str] = set()
@@ -569,29 +592,17 @@ def _features_table(rows: list[tuple[str, str]]) -> str:
     return "\n".join(f"| {_cell(title)} | `{_cell(path)}` |" for title, path in rows)
 
 
-def _gap_rows(adapter: dict[str, Any]) -> list[dict[str, str]]:
+def _gap_rows(adapter: dict[str, Any]) -> list[gaps.Gap]:
     entries = adapter.get("gaps", [])
-    if not isinstance(entries, list):
-        raise InitError("gaps: ожидается список")
-    rows: list[dict[str, str]] = []
-    for position, entry in enumerate(entries):
-        place = f"gaps[{position}]"
-        if not isinstance(entry, dict):
-            raise InitError(f"{place}: ожидается объект")
-        extra = set(entry) - {"id", "reason", "owner", "trigger"}
-        if extra:
-            raise InitError(f"{place}: неизвестные поля: {', '.join(sorted(extra))}")
-        for key in ("id", "reason", "owner", "trigger"):
-            value = entry.get(key)
-            if not isinstance(value, str) or not value.strip():
-                raise InitError(f"{place}.{key}: ожидается непустая строка")
-        rows.append(entry)
-    return rows
+    try:
+        return gaps.load(entries)
+    except gaps.GapError as error:
+        raise InitError(str(error)) from error
 
 
-def _gaps_table(rows: list[dict[str, str]]) -> str:
+def _gaps_table(rows: list[gaps.Gap]) -> str:
     return "\n".join(
-        f"| {_cell(row['id'])} | {_cell(row['reason'])} | {_cell(row['owner'])} | {_cell(row['trigger'])} |"
+        f"| {_cell(row.id)} | {_cell(row.reason)} | {_cell(row.owner)} | {_cell(row.trigger)} |"
         for row in rows
     )
 
@@ -682,6 +693,7 @@ def main(argv: list[str] | None = None) -> int:
                 "--profile", "--adapter", "--answers", "--write-profile", "--write-baseline",
                 "--dry-run", "--ask", "--yes", "--refresh", "--help",
             },
+            {"--profile", "--adapter", "--answers", "--write-profile", "--write-baseline"},
         )
     except UsageError as error:
         print(f"{error}\nИспользование: python -m ai_kit.init --help", file=sys.stderr)
@@ -747,6 +759,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Профиль: {report.profile}")
     print(f"Документов: {len(report.documents)}")
+    if report.features:
+        print(f"Файлов функций: {len(report.features)}")
     print(f"Неизвестных: {report.unknowns}")
     if report.overwritten:
         print(f"Перезаписано: {', '.join(report.overwritten)}")

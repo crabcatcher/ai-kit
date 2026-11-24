@@ -8,7 +8,7 @@ from dataclasses import dataclass, fields as dc_fields
 from pathlib import Path
 from typing import Any
 
-from ai_kit import baseline, detect, gates, inputs, interview, precommit, profile, rules, templates
+from ai_kit import baseline, detect, gaps, gates, inputs, interview, precommit, profile, rules, templates
 from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.diagnostics import Diagnostic, Report
@@ -643,17 +643,31 @@ def _code_paths(text: str) -> list[str]:
     section = text[start:] if end < 0 else text[start:end]
     paths: list[str] = []
     for line in section.splitlines():
-        if not line.strip().startswith("|") or _is_separator(line):
-            continue
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) < 2:
-            continue
-        for match in CODE_PATH.finditer(cells[-1]):
-            value = re.sub(r":\d+(?:-\d+)?$", "", match.group(1).strip())
-            if not value or value == "—" or value.startswith(("http", "#", "<")) or "*" in value:
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            if _is_separator(stripped):
                 continue
-            paths.append(value)
+            cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+            if len(cells) < 2:
+                continue
+            for match in CODE_PATH.finditer(cells[-1]):
+                value = _code_value(match.group(1))
+                if value:
+                    paths.append(value)
+            continue
+        if stripped.startswith(("-", "*")):
+            for match in CODE_PATH.finditer(stripped):
+                value = _code_value(match.group(1))
+                if value and ("/" in value or "\\" in value):
+                    paths.append(value)
     return paths
+
+
+def _code_value(raw: str) -> str | None:
+    value = re.sub(r":\d+(?:-\d+)?$", "", raw.strip())
+    if not value or value == "—" or value.startswith(("http", "#", "<")) or "*" in value:
+        return None
+    return value
 
 
 def _is_separator(line: str) -> bool:
@@ -670,24 +684,13 @@ def _disabled_gaps(parsed: profile.Profile) -> list[Diagnostic]:
 
 def _declared_gaps(adapter: dict[str, Any]) -> list[Diagnostic]:
     entries = adapter.get("gaps", [])
-    if not isinstance(entries, list):
-        return [Diagnostic("adapter", "error", "gaps", "ожидается список пробелов")]
-    diagnostics: list[Diagnostic] = []
-    for index, entry in enumerate(entries):
-        place = f"gaps[{index}]"
-        if not isinstance(entry, dict):
-            diagnostics.append(Diagnostic("adapter", "error", place, "ожидается объект"))
-            continue
-        extra = set(entry) - {"id", "reason", "owner", "trigger"}
-        for key in sorted(extra):
-            diagnostics.append(Diagnostic("adapter", "error", f"{place}.{key}", "неизвестное поле"))
-        for key in ("id", "reason", "owner", "trigger"):
-            value = entry.get(key)
-            if not isinstance(value, str) or not value.strip():
-                diagnostics.append(Diagnostic("adapter", "error", f"{place}.{key}", "ожидается непустая строка"))
-        if all(isinstance(entry.get(key), str) and entry.get(key).strip() for key in ("id", "reason", "owner", "trigger")):
-            diagnostics.append(Diagnostic("gate", "gap", entry["id"], f"заявленный пробел: {entry['reason']}"))
-    return diagnostics
+    problems = gaps.errors(entries)
+    if problems:
+        return [Diagnostic("adapter", "error", path, message) for path, message in problems]
+    return [
+        Diagnostic("gate", "gap", gap.id, f"заявленный пробел: {gap.reason}")
+        for gap in gaps.load(entries)
+    ]
 
 
 def _gate_coverage(gate_list: list[gates.Gate], adapter_rules: list[rules.Rule]) -> list[Diagnostic]:
@@ -727,7 +730,11 @@ def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = normalize(sys.argv[1:] if argv is None else argv)
     try:
-        ensure_known(args, {"--profile", "--adapter", "--gates", "--json", "--baseline", "--help"})
+        ensure_known(
+            args,
+            {"--profile", "--adapter", "--gates", "--json", "--baseline", "--help"},
+            {"--profile", "--adapter", "--baseline"},
+        )
     except UsageError as error:
         print(f"{error}\nИспользование: python -m ai_kit.doctor --help", file=sys.stderr)
         return 2

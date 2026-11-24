@@ -1,0 +1,9 @@
+{
+  "mutations": [
+    {"write": {"path": "baseline.toml", "text": "schema_version = \"1\"\n\n[[violation]]\nrule = \"P1\"\npath = \"src/Gone\"\nreason = \"старое\"\nowner = \"владелец проекта\"\ntrigger = \"изменение участка\"\n"}}
+  ],
+  "expect": [
+    {"code": "baseline", "severity": "warning", "path": "baseline.toml", "message": "файла из baseline нет: src/Gone"}
+  ],
+  "exit": 0
+}

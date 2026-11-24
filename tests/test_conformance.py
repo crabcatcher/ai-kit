@@ -69,6 +69,7 @@ class ConformanceTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             target = Path(temporary)
             copy_case(case_dir, target)
+            apply_mutations(target, case.get("setup", []))
             adapter = target / case["adapter"] if case.get("adapter") else None
             profile = target / "profile.toml" if (target / "profile.toml").exists() else EXAMPLE
             generate(Request(target=target, kit_root=ROOT, profile=profile, adapter=adapter))
@@ -88,6 +89,11 @@ class ConformanceTests(unittest.TestCase):
                 self.assertTrue(
                     self.matches(expected, report),
                     f"не найдено {expected} в отчёте:\n{report.to_table()}",
+                )
+            for rejected in case.get("reject", []):
+                self.assertFalse(
+                    self.matches(rejected, report),
+                    f"неожиданно найдено {rejected} в отчёте:\n{report.to_table()}",
                 )
 
     def matches(self, expected: dict, report) -> bool:

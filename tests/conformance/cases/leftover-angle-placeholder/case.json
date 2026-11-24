@@ -1,0 +1,9 @@
+{
+  "mutations": [
+    {"append": {"path": ".project/development.md", "text": "\nСмотри <куда-то>.\n"}}
+  ],
+  "expect": [
+    {"code": "placeholder", "severity": "warning", "path": "development.md", "message": "незаполненная заглушка"}
+  ],
+  "exit": 0
+}

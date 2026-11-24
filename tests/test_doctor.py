@@ -71,11 +71,60 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(report.ok, report.to_table())
         self.assertEqual([item for item in report.diagnostics if item.severity == "error"], [])
 
+    def test_not_applicable_profile_is_accepted(self) -> None:
+        self.make()
+        self.append(
+            "profile.toml",
+            '\n[[not_applicable]]\nfield = "automation.clients"\nreason = "клиентов агента нет"\n',
+        )
+        report = self.doctor()
+        self.assertEqual([item for item in report.diagnostics if item.code == "profile"], [])
+
+    def test_unreadable_feature_file_is_diagnostic(self) -> None:
+        self.make()
+        path = self.target / ".project" / "features" / "bad.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xff\xfe\x00")
+        report = self.doctor()
+        self.assertTrue(
+            any(
+                item.code == "features" and "не читается" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
+    def test_unreadable_document_is_diagnostic(self) -> None:
+        self.make()
+        (self.target / ".project" / "architecture.md").write_bytes(b"\xff\xfe\x00")
+        report = self.doctor()
+        self.assertTrue(
+            any(
+                item.code == "document" and "не читается" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
     def test_empty_adapter_fragment_warns(self) -> None:
         self.make()
         report = self.doctor()
         codes = [item.code for item in report.diagnostics]
         self.assertIn("adapter", codes)
+
+    def test_adapter_markers_are_not_placeholders(self) -> None:
+        self.make()
+        report = self.doctor()
+        placeholders = [item for item in report.diagnostics if item.code == "placeholder"]
+        self.assertFalse(any("adapter:" in item.message for item in placeholders))
+
+    def test_code_fence_is_not_placeholder(self) -> None:
+        self.make()
+        self.append(".project/development.md", "\n```\n<T>\n```\n")
+        report = self.doctor()
+        self.assertFalse(
+            any(item.code == "placeholder" and "<T>" in item.message for item in report.diagnostics)
+        )
 
     def test_fixture_gates_are_not_run_without_flag(self) -> None:
         self.make(FIXTURE)

@@ -1,0 +1,9 @@
+{
+  "setup": [
+    {"write": {"path": ".project/features/entry.md", "text": "# Вход\n\n## Назначение\n\nПускать пользователя.\n\n## Логика\n\nПроверка и выдача.\n\n## Контракты\n\nВход и ответ.\n\n## Где в коде\n\n| Часть | Путь |\n|---|---|\n| обработчик `Service` | `src/missing.py:10-20` |\n\n## Нюансы\n\nНет.\n\n## Что не разобрано\n\nНет.\n"}}
+  ],
+  "expect": [
+    {"code": "features", "severity": "warning", "path": "entry.md", "message": "путь кода не найден: src/missing.py"}
+  ],
+  "exit": 0
+}

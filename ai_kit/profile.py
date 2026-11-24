@@ -158,6 +158,19 @@ def _flag(value: Any, path: str, errors: list[tuple[str, str]]) -> None:
         errors.append((path, "ожидается true или false"))
 
 
+def _has_value(data: dict[str, Any], path: str) -> bool:
+    node: Any = data
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    if node is None:
+        return False
+    if isinstance(node, (str, list, dict)) and not node:
+        return False
+    return True
+
+
 def _evidence_list(
     value: Any, path: str, errors: list[tuple[str, str]]
 ) -> None:
@@ -191,7 +204,8 @@ def validate(data: Any) -> list[tuple[str, str]]:
 
     top_allowed = {
         "schema_version", "project", "docs", "stack", "layout", "tests",
-        "process", "automation", "security", "rules", "gates", "unknowns", "adapter",
+        "process", "automation", "security", "rules", "gates", "unknowns",
+        "not_applicable", "adapter",
     }
     _check_keys(data, top_allowed, "", errors)
     _text(data.get("schema_version"), "schema_version", errors, required=True)
@@ -308,6 +322,35 @@ def validate(data: Any) -> list[tuple[str, str]]:
             _check_keys(unknown, {"field", "question"}, unknown_path, errors)
             _text(unknown.get("field"), f"{unknown_path}.field", errors, required=True)
             _text(unknown.get("question"), f"{unknown_path}.question", errors, required=True)
+
+    not_applicable = data.get("not_applicable", [])
+    if not isinstance(not_applicable, list):
+        errors.append(("not_applicable", "ожидается список"))
+    else:
+        from ai_kit import schema as profile_schema
+
+        seen_fields: set[str] = set()
+        for index, entry in enumerate(not_applicable):
+            place = f"not_applicable[{index}]"
+            if not isinstance(entry, dict):
+                errors.append((place, "ожидается объект"))
+                continue
+            _check_keys(entry, {"field", "reason"}, place, errors)
+            field = entry.get("field")
+            _text(field, f"{place}.field", errors, required=True)
+            _text(entry.get("reason"), f"{place}.reason", errors, required=True)
+            if not _is_str(field):
+                continue
+            if profile_schema.resolve(field) is None:
+                errors.append((f"{place}.field", "поля нет в схеме профиля"))
+                continue
+            if profile_schema.is_required(field):
+                errors.append((f"{place}.field", "обязательное поле нельзя объявить неприменимым"))
+            if field in seen_fields:
+                errors.append((f"{place}.field", "поле указано дважды"))
+            seen_fields.add(field)
+            if _has_value(data, field):
+                errors.append((f"{place}.field", "поле заполнено и объявлено неприменимым"))
 
     adapter = data.get("adapter", {})
     if not isinstance(adapter, dict):
@@ -492,6 +535,7 @@ def print_schema() -> str:
             },
             "automation": {
                 "type": "object",
+                "required": ["pre_commit"],
                 "additionalProperties": False,
                 "properties": {
                     "clients": {"type": "array", "items": {"type": "string"}},
@@ -538,6 +582,18 @@ def print_schema() -> str:
                     "properties": {
                         "field": {"type": "string"},
                         "question": {"type": "string"},
+                    },
+                },
+            },
+            "not_applicable": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["field", "reason"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "field": {"type": "string"},
+                        "reason": {"type": "string"},
                     },
                 },
             },

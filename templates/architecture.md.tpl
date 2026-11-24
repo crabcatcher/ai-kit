@@ -52,3 +52,8 @@
 
 {{#each unknowns}}- {{ field }}: {{ question }}
 {{/each}}
+{{#if not_applicable}}
+Осознанно неприменимо:
+{{#each not_applicable}}- {{ field }}: {{ reason }}
+{{/each}}
+{{/if}}

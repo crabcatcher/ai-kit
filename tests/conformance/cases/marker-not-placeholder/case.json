@@ -1,0 +1,6 @@
+{
+  "reject": [
+    {"code": "placeholder", "message": "adapter:"}
+  ],
+  "exit": 0
+}

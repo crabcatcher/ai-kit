@@ -31,6 +31,7 @@ from ai_kit.interview import (
     parse_answers,
     parse_probes,
     parse_questions,
+    plan_batch,
     plan_payload,
     prepare,
     report,
@@ -129,6 +130,15 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(len(bank.questions), UNIVERSAL_LIMIT)
         self.assertIn("process.branches", bank.dropped[0].reason)
 
+    def test_optional_question_is_not_asked(self) -> None:
+        item = Question("opt", "?", ("project.boundaries",), "?", "universal", optional=True)
+        self.assertEqual(plan_batch([item], {}), [])
+
+    def test_not_applicable_slot_is_not_asked(self) -> None:
+        item = question(id="tests", slots=("tests.framework",))
+        values = {"not_applicable": [{"field": "tests.framework", "reason": "автотестов нет"}]}
+        self.assertEqual(plan_batch([item], values), [])
+
     def test_merged_limit_enforced(self) -> None:
         universal = load_questions(QUESTIONS)
         extra = [question(id=f"a{index}", slots=(f"custom.{index}",)) for index in range(MERGED_LIMIT)]
@@ -189,6 +199,13 @@ class ProbeParsingTests(unittest.TestCase):
     def test_broken_regex_rejected(self) -> None:
         self.assert_error([self.probe(extract="regex:(")], "probes[0].extract")
 
+    def test_none_with_argument_rejected(self) -> None:
+        self.assert_error([self.probe(extract="none:x")], "probes[0].extract")
+
+    def test_dotted_key_path_allowed(self) -> None:
+        probes = parse_probes([self.probe(extract=r"json:dependencies.socket\.io")])
+        self.assertEqual(probes[0].extract, r"json:dependencies.socket\.io")
+
     def test_provenance_answer_rejected(self) -> None:
         self.assert_error([self.probe(provenance="answer")], "probes[0].provenance")
 
@@ -239,6 +256,18 @@ class ProbeRunTests(unittest.TestCase):
         hits, _ = run_probes(self.root, [probe])
         self.assertEqual(hits[0].value, "7")
 
+    def test_dotted_key_probe(self) -> None:
+        self.write("manifest.json", '{"dependencies": {"socket.io": "1.2"}}')
+        probe = Probe(
+            "runtime",
+            ("manifest.json",),
+            "stack.runtime",
+            r"json:dependencies.socket\.io",
+            "runtime",
+        )
+        hits, _ = run_probes(self.root, [probe])
+        self.assertEqual(hits[0].value, "1.2")
+
     def test_regex_probe_takes_first_group(self) -> None:
         self.write("VERSION", "release = 3.4.5\n")
         probe = Probe("release", ("VERSION",), "project.purpose", r"regex:release = ([\d.]+)", None)
@@ -275,6 +304,20 @@ class ProbeRunTests(unittest.TestCase):
         hits, misses = run_probes(self.root, [probe])
         self.assertEqual(misses, [])
         self.assertIsNone(hits[0].value)
+
+    def test_presence_probe_checks_extract(self) -> None:
+        self.write("manifest.json", "{}")
+        probe = Probe(
+            "store",
+            ("manifest.json",),
+            "stack.stores",
+            "json:missing",
+            "store",
+            version_required=False,
+        )
+        hits, misses = run_probes(self.root, [probe])
+        self.assertEqual(hits, [])
+        self.assertIn("значение не найдено", misses[0].reason)
 
 
 class ProbeApplyTests(unittest.TestCase):
@@ -316,6 +359,12 @@ class ProbeApplyTests(unittest.TestCase):
         self.assertEqual(result["stack"]["runtime"][0]["version"], "9.1")
         self.assertEqual(result["stack"]["runtime"][0]["evidence"], "manifest.json")
 
+    def test_hit_clears_not_applicable(self) -> None:
+        values = {"not_applicable": [{"field": "project.purpose", "reason": "нет"}]}
+        result = apply_probe_hits(values, [self.hit(field="project.purpose", value="продукт")])
+        self.assertNotIn("not_applicable", result)
+        self.assertEqual(result["project"]["purpose"], "продукт")
+
     def test_wrong_scalar_type_rejected(self) -> None:
         with self.assertRaises(InterviewError):
             apply_probe_hits({}, [self.hit(field="process.tiers", value="да")])
@@ -332,6 +381,100 @@ class ProbeApplyTests(unittest.TestCase):
 
 
 class AnswerTests(unittest.TestCase):
+    def test_not_applicable_answer_records_decision(self) -> None:
+        item = question(id="tests", slots=("tests.framework",))
+        values, unknowns, _ = apply_answers(
+            {},
+            [item],
+            [item],
+            [Answer("tests.framework", status="not_applicable", reason="автотестов нет")],
+        )
+        self.assertEqual(
+            values["not_applicable"],
+            [{"field": "tests.framework", "reason": "автотестов нет"}],
+        )
+        self.assertEqual(unknowns, [])
+
+    def test_not_applicable_answer_needs_reason(self) -> None:
+        item = question(id="tests", slots=("tests.framework",))
+        with self.assertRaises(InterviewError):
+            apply_answers({}, [item], [item], [Answer("tests.framework", status="not_applicable")])
+
+    def test_not_applicable_rejected_for_required_field(self) -> None:
+        item = question(id="roles", slots=("process.review_roles",))
+        with self.assertRaises(InterviewError):
+            apply_answers(
+                {},
+                [item],
+                [item],
+                [Answer("process.review_roles", status="not_applicable", reason="нет")],
+            )
+
+    def test_not_applicable_rejected_for_pre_commit(self) -> None:
+        item = question(id="ci", slots=("automation.pre_commit",))
+        with self.assertRaises(InterviewError):
+            apply_answers(
+                {},
+                [item],
+                [item],
+                [Answer("automation.pre_commit", status="not_applicable", reason="нет")],
+            )
+
+    def test_not_applicable_conflicts_with_known_value(self) -> None:
+        item = question(id="tests", slots=("tests.framework",))
+        with self.assertRaises(InterviewError):
+            apply_answers(
+                {"tests": {"framework": "runner"}},
+                [item],
+                [item],
+                [Answer("tests.framework", status="not_applicable", reason="нет")],
+            )
+
+    def test_parse_rejects_not_applicable_for_pre_commit(self) -> None:
+        with self.assertRaises(InterviewError):
+            parse_answers(
+                {
+                    "answer": [
+                        {
+                            "slot": "automation.pre_commit",
+                            "status": "not_applicable",
+                            "reason": "нет",
+                        }
+                    ]
+                }
+            )
+
+    def test_reason_allowed_only_for_not_applicable(self) -> None:
+        with self.assertRaises(InterviewError):
+            parse_answers(
+                {"answer": [{"slot": "project.purpose", "value": "продукт", "reason": "лишнее"}]}
+            )
+
+    def test_parse_not_applicable(self) -> None:
+        parsed = parse_answers(
+            {
+                "answer": [
+                    {
+                        "slot": "tests.framework",
+                        "status": "not_applicable",
+                        "reason": "автотестов нет",
+                    }
+                ]
+            }
+        )
+        self.assertEqual(parsed[0].status, "not_applicable")
+        self.assertEqual(parsed[0].reason, "автотестов нет")
+
+    def test_not_applicable_removed_when_answer_fills_slot(self) -> None:
+        item = question(id="purpose", slots=("project.purpose",))
+        values = {"not_applicable": [{"field": "project.purpose", "reason": "нет"}]}
+        result, unknowns, _ = apply_answers(
+            values, [item], [item], [Answer("project.purpose", value="продукт")]
+        )
+        self.assertNotIn("not_applicable", result)
+        self.assertEqual(result["project"]["purpose"], "продукт")
+        self.assertEqual(unknowns, [])
+
     def test_scalar_answer_sets_value(self) -> None:
         values, unknowns, stats = apply_answers(
             {}, [question()], [question()], [Answer("project.purpose", value="продукт")]

@@ -20,6 +20,7 @@ FEATURE_LINK = re.compile(r"`([^`]+\.md)`")
 EMPTY_ADAPTER = re.compile(r"<!-- adapter:([a-z0-9-]+):begin -->\s*<!-- adapter:\1:end -->")
 PLACEHOLDER = re.compile(r"<[^<>\n]{1,40}>")
 FEATURE_SECTIONS = ("## Назначение", "## Логика", "## Контракты", "## Где в коде", "## Нюансы", "## Что не разобрано")
+CODE_PATH = re.compile(r"`([^`]+)`")
 EXTERNAL = ("http://", "https://", "mailto:", "tel:")
 
 
@@ -158,8 +159,8 @@ def _document_diagnostics(
             diagnostics.append(Diagnostic("document", "error", relative, "документа нет по ожидаемому пути"))
             continue
         try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as error:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as error:
             diagnostics.append(Diagnostic("document", "error", relative, f"документ не читается: {error}"))
             continue
         diagnostics.extend(_text_diagnostics(text, relative))
@@ -169,7 +170,8 @@ def _document_diagnostics(
 
 def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
-    if "{{" in text:
+    visible = _visible_text(text)
+    if "{{" in visible:
         diagnostics.append(Diagnostic("placeholder", "error", relative, "в результате остались подстановки шаблона"))
     headings = [line for line in text.splitlines() if re.match(r"^#\s+", line)]
     if len(headings) != 1:
@@ -185,13 +187,18 @@ def _text_diagnostics(text: str, relative: str) -> list[Diagnostic]:
             diagnostics.append(
                 Diagnostic("adapter", "warning", relative, f"фрагмент adapter:{match.group(1)} не заполнен")
             )
-        for match in PLACEHOLDER.finditer(text):
+        for match in PLACEHOLDER.finditer(visible):
             diagnostics.append(
                 Diagnostic("placeholder", "warning", relative, f"незаполненная заглушка: {match.group(0)}")
             )
-        if "TODO" in text:
+        if "TODO" in visible:
             diagnostics.append(Diagnostic("placeholder", "warning", relative, "в документе остался TODO"))
     return diagnostics
+
+
+def _visible_text(text: str) -> str:
+    visible = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    return re.sub(r"```.*?```", "", visible, flags=re.DOTALL)
 
 
 def _link_diagnostics(text: str, path: Path, relative: str, root: Path) -> list[Diagnostic]:
@@ -350,13 +357,51 @@ def _features_diagnostics(
             diagnostics.append(
                 Diagnostic("features", "error", "FEATURES.md", f"функция не внесена в карту: {relative}")
             )
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as error:
+            diagnostics.append(
+                Diagnostic("features", "error", relative, f"файл функции не читается: {error}")
+            )
+            continue
         for section in FEATURE_SECTIONS:
             if section not in text:
                 diagnostics.append(
                     Diagnostic("features", "error", relative, f"нет обязательного раздела: {section[3:]}")
                 )
+        for code_path in _code_paths(text):
+            target = _inside(request.root, code_path)
+            if target is None or not target.exists():
+                diagnostics.append(
+                    Diagnostic("features", "warning", relative, f"путь кода не найден: {code_path}")
+                )
     return diagnostics
+
+
+def _code_paths(text: str) -> list[str]:
+    start = text.find("## Где в коде")
+    if start < 0:
+        return []
+    end = text.find("\n## ", start + 1)
+    section = text[start:] if end < 0 else text[start:end]
+    paths: list[str] = []
+    for line in section.splitlines():
+        if not line.strip().startswith("|") or _is_separator(line):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        for match in CODE_PATH.finditer(cells[-1]):
+            value = re.sub(r":\d+(?:-\d+)?$", "", match.group(1).strip())
+            if not value or value == "—" or value.startswith(("http", "#", "<")) or "*" in value:
+                continue
+            paths.append(value)
+    return paths
+
+
+def _is_separator(line: str) -> bool:
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    return bool(cells) and all(re.fullmatch(r":?-{2,}:?", cell) for cell in cells)
 
 
 def _disabled_gaps(parsed: profile.Profile) -> list[Diagnostic]:

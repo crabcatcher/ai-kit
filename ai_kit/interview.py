@@ -23,9 +23,9 @@ ADAPTER_LIMIT = 5
 MERGED_LIMIT = 15
 MAX_PROBE_BYTES = 2 * 1024 * 1024
 
-ANSWER_STATUSES = ("answered", "unknown")
+ANSWER_STATUSES = ("answered", "unknown", "not_applicable")
 EXTRACT_KINDS = ("json", "toml", "regex", "none")
-EXTRACT_PATH = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
+EXTRACT_PATH = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+|\\\.[A-Za-z0-9_-]+)*$")
 DRIVE = re.compile(r"^[A-Za-z]:")
 
 ABSENT = object()
@@ -46,6 +46,7 @@ class Question:
     source: str
     example: str | None = None
     hint: str | None = None
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,7 @@ class Answer:
     value: Any = ABSENT
     name: str | None = None
     version: str | None = None
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -143,7 +145,7 @@ def parse_questions(data: dict[str, Any], source: str) -> list[Question]:
         if not isinstance(entry, dict):
             errors.append((place, "ожидается объект"))
             continue
-        for key in sorted(set(entry) - {"id", "question", "slots", "why", "example", "hint"}):
+        for key in sorted(set(entry) - {"id", "question", "slots", "why", "example", "hint", "optional"}):
             errors.append((f"{place}.{key}", "неизвестное поле"))
 
         fields: dict[str, str] = {}
@@ -159,6 +161,9 @@ def parse_questions(data: dict[str, Any], source: str) -> list[Question]:
                 errors.append((f"{place}.{key}", "ожидается непустая строка"))
             elif isinstance(value, str):
                 fields[key] = value
+        optional = entry.get("optional", False)
+        if not isinstance(optional, bool):
+            errors.append((f"{place}.optional", "ожидается true или false"))
 
         slots = entry.get("slots")
         if not isinstance(slots, list) or not slots or not all(
@@ -192,6 +197,7 @@ def parse_questions(data: dict[str, Any], source: str) -> list[Question]:
                 source=source,
                 example=fields.get("example"),
                 hint=fields.get("hint"),
+                optional=optional,
             )
         )
 
@@ -247,6 +253,10 @@ def apply_commands(values: dict[str, Any], adapter: dict[str, Any]) -> dict[str,
     tests = result.setdefault("tests", {})
     if not isinstance(tests, dict):
         raise InterviewError([("tests", "ожидается объект")])
+    if "tests.commands" in not_applicable_fields(result):
+        raise InterviewError(
+            [("tests.commands", "объявлено неприменимым в профиле, а адаптер задаёт команды")]
+        )
     commands = tests.setdefault("commands", {})
     if not isinstance(commands, dict):
         raise InterviewError([("tests.commands", "ожидается объект")])
@@ -380,8 +390,7 @@ def _validate_extract(extract: str, path: str, errors: list[tuple[str, str]]) ->
         errors.append((path, f"ожидается одно из: {', '.join(EXTRACT_KINDS)}"))
         return
     if kind == "none":
-        if argument:
-            errors.append((path, "none не принимает аргумент"))
+        errors.append((path, "none не принимает аргумент"))
         return
     if not argument:
         errors.append((path, "правило извлечения пустое"))
@@ -430,6 +439,9 @@ def _run_probe(root: Path, probe: Probe) -> ProbeHit | ProbeMiss:
                 reason = f"файл не читается: {error}"
                 continue
             if not probe.version_required:
+                if probe.extract != "none" and _extract(probe.extract, text) is ABSENT:
+                    reason = "значение не найдено"
+                    continue
                 return ProbeHit(
                     probe_id=probe.id,
                     field=probe.field,
@@ -471,7 +483,7 @@ def _extract(extract: str, text: str) -> Any:
     except (json.JSONDecodeError, tomllib.TOMLDecodeError):
         return ABSENT
     node: Any = data
-    for part in argument.split("."):
+    for part in _path_parts(argument):
         if isinstance(node, list) and part.isdigit() and int(part) < len(node):
             node = node[int(part)]
         elif isinstance(node, dict) and part in node:
@@ -479,6 +491,10 @@ def _extract(extract: str, text: str) -> Any:
         else:
             return ABSENT
     return node
+
+
+def _path_parts(argument: str) -> list[str]:
+    return [part.replace("\\.", ".") for part in re.split(r"(?<!\\)\.", argument)]
 
 
 def apply_probe_hits(values: dict[str, Any], hits: list[ProbeHit]) -> dict[str, Any]:
@@ -506,11 +522,13 @@ def apply_probe_hits(values: dict[str, Any], hits: list[ProbeHit]) -> dict[str, 
             }
             if hit.value is not None:
                 entry["version"] = str(hit.value)
+            _clear_not_applicable(result, hit.field)
             _upsert_evidence(result, hit.field, entry)
             continue
         if hit.field in filled:
             raise InterviewError([(hit.field, "значение уже заполнено другой пробой")])
         validate_value(node, hit.value, hit.field)
+        _clear_not_applicable(result, hit.field)
         _set_slot(result, hit.field, hit.value)
         filled.add(hit.field)
     return result
@@ -544,7 +562,13 @@ def _append_evidence(values: dict[str, Any], field_name: str, entry: dict[str, s
 
 
 def plan_batch(questions: list[Question], values: dict[str, Any]) -> list[Question]:
-    return [question for question in questions if any(not is_known(values, slot) for slot in question.slots)]
+    decided = not_applicable_fields(values)
+    return [
+        question
+        for question in questions
+        if not question.optional
+        and any(not is_known(values, slot) and slot not in decided for slot in question.slots)
+    ]
 
 
 def load_answers(path: Path) -> list[Answer]:
@@ -609,6 +633,7 @@ def plan_payload(prepared: Prepared) -> dict[str, Any]:
                 "why": question.why,
                 "example": question.example,
                 "hint": question.hint,
+                "optional": question.optional,
                 "source": question.source,
                 "slots": [describe_slot(slot) for slot in question.slots],
             }
@@ -635,7 +660,7 @@ def parse_answers(data: dict[str, Any]) -> list[Answer]:
         if not isinstance(entry, dict):
             errors.append((place, "ожидается объект"))
             continue
-        for key in sorted(set(entry) - {"slot", "status", "value", "name", "version"}):
+        for key in sorted(set(entry) - {"slot", "status", "value", "name", "version", "reason"}):
             errors.append((f"{place}.{key}", "неизвестное поле"))
 
         slot = entry.get("slot")
@@ -668,11 +693,31 @@ def parse_answers(data: dict[str, Any]) -> list[Answer]:
             status = "answered"
 
         version = entry.get("version")
+        if status != "not_applicable" and "reason" in entry:
+            errors.append((f"{place}.reason", "причина допустима только для неприменимого поля"))
         if status == "unknown":
             if "value" in entry or name is not None or version is not None:
                 errors.append((place, "у неизвестного ответа не бывает значения"))
             if slot:
                 answers.append(Answer(slot=slot, status="unknown"))
+            continue
+
+        if status == "not_applicable":
+            reason = entry.get("reason")
+            if "value" in entry or name is not None or version is not None:
+                errors.append((place, "у неприменимого поля не бывает значения"))
+            if not isinstance(reason, str) or not reason.strip():
+                errors.append((f"{place}.reason", "нужна причина, почему поле неприменимо"))
+            if slot and schema.is_required(slot):
+                errors.append((f"{place}.status", "обязательное поле нельзя объявить неприменимым"))
+            if slot:
+                answers.append(
+                    Answer(
+                        slot=slot,
+                        status="not_applicable",
+                        reason=reason if isinstance(reason, str) else None,
+                    )
+                )
             continue
 
         if not slot:
@@ -728,6 +773,16 @@ def apply_answers(
             raise InterviewError([(answer.slot, "поля нет в схеме профиля")])
         evidence = schema.is_evidence(node)
         known = is_known(result, answer.slot)
+        if answer.status == "not_applicable":
+            if known:
+                raise InterviewError([(answer.slot, "поле уже заполнено, объявить его неприменимым нельзя")])
+            if schema.is_required(answer.slot):
+                raise InterviewError([(answer.slot, "обязательное поле нельзя объявить неприменимым")])
+            if not answer.reason:
+                raise InterviewError([(answer.slot, "нужна причина, почему поле неприменимо")])
+            _set_not_applicable(result, answer.slot, answer.reason)
+            answered += 1
+            continue
         if known:
             names = []
             if evidence and answer.status == "answered" and answer.name:
@@ -744,6 +799,7 @@ def apply_answers(
         if evidence:
             if not answer.name:
                 raise InterviewError([(answer.slot, "для поля-доказательства нужно имя факта")])
+            _clear_not_applicable(result, answer.slot)
             _append_evidence(result, answer.slot, {"name": answer.name, "provenance": "answer"})
             answered += 1
             if answer.version == "none":
@@ -756,17 +812,43 @@ def apply_answers(
             continue
 
         validate_value(node, answer.value, answer.slot)
+        _clear_not_applicable(result, answer.slot)
         _set_slot(result, answer.slot, answer.value)
         answered += 1
 
     known_unknowns = {entry["field"] for entry in unknowns}
+    not_applicable = not_applicable_fields(result)
     for question in batch:
         for slot in question.slots:
-            if not is_known(result, slot) and slot not in known_unknowns:
+            if not is_known(result, slot) and slot not in known_unknowns and slot not in not_applicable:
                 unknowns.append({"field": slot, "question": question.text})
                 known_unknowns.add(slot)
 
     return result, unknowns, AnswerStats(asked=len(batch), answered=answered, ignored=ignored)
+
+
+def _set_not_applicable(values: dict[str, Any], field_name: str, reason: str) -> None:
+    entries = values.setdefault("not_applicable", [])
+    if not isinstance(entries, list):
+        raise InterviewError([("not_applicable", "ожидается список")])
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("field") == field_name:
+            entry["reason"] = reason
+            return
+    entries.append({"field": field_name, "reason": reason})
+
+
+def _clear_not_applicable(values: dict[str, Any], field_name: str) -> None:
+    entries = values.get("not_applicable")
+    if not isinstance(entries, list):
+        return
+    remaining = [
+        entry for entry in entries if not (isinstance(entry, dict) and entry.get("field") == field_name)
+    ]
+    if remaining:
+        values["not_applicable"] = remaining
+    else:
+        values.pop("not_applicable", None)
 
 
 def probe_unknowns(misses: list[ProbeMiss]) -> list[dict[str, str]]:
@@ -810,7 +892,12 @@ def finish(prepared: Prepared, answers: list[Answer]) -> InterviewResult:
         answers,
     )
     merged = dedupe_unknowns(probe_unknowns(list(prepared.misses)) + unknowns)
-    unresolved = [entry for entry in merged if not is_known(values, entry["field"])]
+    not_applicable = not_applicable_fields(values)
+    unresolved = [
+        entry
+        for entry in merged
+        if not is_known(values, entry["field"]) and entry["field"] not in not_applicable
+    ]
     return InterviewResult(
         values=values,
         unknowns=tuple(unresolved),
@@ -825,6 +912,7 @@ def report(result: InterviewResult) -> str:
     probe_facts = _count_provenance(result.values, "probe")
     answer_facts = _count_provenance(result.values, "answer")
     disabled = result.values.get("gates", {}).get("disabled", [])
+    not_applicable = result.values.get("not_applicable", [])
     lines = [
         "| Что | Сколько |",
         "|---|---|",
@@ -833,6 +921,7 @@ def report(result: InterviewResult) -> str:
         f"| вопросов задано | {result.stats.asked} |",
         f"| ответов получено | {result.stats.answered} |",
         f"| ответов проигнорировано (уже подтверждено) | {result.stats.ignored} |",
+        f"| полей намеренно неприменимо | {len(not_applicable)} |",
         f"| осталось неизвестным | {len(result.unknowns)} |",
         f"| отключённых гейтов с триггером | {len(disabled)} |",
     ]
@@ -850,6 +939,14 @@ def is_known(values: dict[str, Any], path: str) -> bool:
     if isinstance(value, (str, list, dict)) and not value:
         return False
     return True
+
+
+def not_applicable_fields(values: dict[str, Any]) -> set[str]:
+    return {
+        entry.get("field")
+        for entry in values.get("not_applicable", [])
+        if isinstance(entry, dict) and isinstance(entry.get("field"), str)
+    }
 
 
 def _get_slot(values: dict[str, Any], path: str) -> Any:

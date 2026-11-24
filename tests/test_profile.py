@@ -73,6 +73,39 @@ class ProfileTests(unittest.TestCase):
         del data["stack"]["runtime"][0]["evidence"]
         self.assert_error(data, "stack.runtime[0].evidence")
 
+    def test_not_applicable_field_accepted(self) -> None:
+        data = copy.deepcopy(example_data())
+        data["not_applicable"] = [{"field": "automation.clients", "reason": "клиентов агента нет"}]
+        parse(data)
+
+    def test_not_applicable_required_field_rejected(self) -> None:
+        data = copy.deepcopy(example_data())
+        data["not_applicable"] = [{"field": "project.name", "reason": "нет"}]
+        self.assert_error(data, "not_applicable[0].field")
+
+    def test_not_applicable_with_value_rejected(self) -> None:
+        data = copy.deepcopy(example_data())
+        data["not_applicable"] = [{"field": "automation.ci", "reason": "нет"}]
+        self.assert_error(data, "not_applicable[0].field")
+
+    def test_not_applicable_unknown_field_rejected(self) -> None:
+        data = copy.deepcopy(example_data())
+        data["not_applicable"] = [{"field": "project.slogan", "reason": "нет"}]
+        self.assert_error(data, "not_applicable[0].field")
+
+    def test_not_applicable_duplicate_rejected(self) -> None:
+        data = copy.deepcopy(example_data())
+        data["not_applicable"] = [
+            {"field": "automation.clients", "reason": "нет"},
+            {"field": "automation.clients", "reason": "повтор"},
+        ]
+        self.assert_error(data, "not_applicable[1].field")
+
+    def test_pre_commit_is_required(self) -> None:
+        data = copy.deepcopy(example_data())
+        del data["automation"]["pre_commit"]
+        self.assert_error(data, "automation.pre_commit")
+
     def test_unknown_key_rejected(self) -> None:
         data = copy.deepcopy(example_data())
         data["project"]["slogan"] = "x"

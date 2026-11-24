@@ -25,7 +25,8 @@ DEFAULT_SCHEMA = "1"
 NO_VALUE = "—"
 PROFILE_ORDER = (
     "schema_version", "project", "docs", "stack", "layout", "tests",
-    "process", "automation", "security", "rules", "gates", "unknowns", "adapter",
+    "process", "automation", "security", "rules", "gates", "unknowns",
+    "not_applicable", "adapter",
 )
 FRAGMENT_MARKER = re.compile(r"^adapter:[a-z0-9][a-z0-9-]*$")
 
@@ -172,7 +173,7 @@ def _plan(
     return Plan(
         documents=documents,
         values=data,
-        fragments=_index_adapter_fragments(documents, data, adapter),
+        fragments=_index_adapter_fragments(documents, data, adapter, request),
         generated={
             "canon": _canon_rules(request.kit_root),
             "adapter": _adapter_rules(adapter),
@@ -215,7 +216,7 @@ def _artifacts(
     if parsed.automation.pre_commit:
         generated = precommit.files(data)
         if not generated:
-            raise InitError("pre_commit=true, но нет команд unit, lint или test")
+            raise InitError("pre_commit=true, но нет команд unit, lint, test или build")
         for relative, text in generated.items():
             artifacts.append((_safe_path(request.target, relative, relative), text))
     return artifacts
@@ -277,7 +278,12 @@ def _merge_unknowns(
             raise InitError(f"unknowns[{index}]: ожидается объект с полем field")
     merged: dict[str, dict[str, str]] = {entry["field"]: entry for entry in existing}
     merged.update({entry["field"]: entry for entry in fresh})
-    return [entry for field, entry in merged.items() if not interview.is_known(data, field)]
+    not_applicable = interview.not_applicable_fields(data)
+    return [
+        entry
+        for field, entry in merged.items()
+        if field not in not_applicable and not interview.is_known(data, field)
+    ]
 
 
 def _canon_rules(kit_root: Path) -> list[rules.Rule]:
@@ -308,6 +314,7 @@ def _index_adapter_fragments(
     documents: list[templates.Document],
     values: dict[str, Any],
     adapter: dict[str, Any],
+    request: Request,
 ) -> dict[str, dict[str, str]]:
     paths = {document.id: templates.document_path(document, values) for document in documents}
     index: dict[str, dict[str, str]] = {}
@@ -315,18 +322,16 @@ def _index_adapter_fragments(
         place = f"docs_fragments[{position}]"
         if not isinstance(entry, dict):
             raise InitError(f"{place}: ожидается объект")
-        extra = set(entry) - {"target", "marker", "content"}
+        extra = set(entry) - {"target", "marker", "content", "content_file"}
         if extra:
             raise InitError(f"{place}: неизвестные поля: {', '.join(sorted(extra))}")
         target = entry.get("target")
         marker = entry.get("marker")
-        content = entry.get("content")
+        content = _fragment_content(entry, place, request)
         if not isinstance(target, str) or not target:
             raise InitError(f"{place}.target: ожидается непустая строка")
         if not isinstance(marker, str) or FRAGMENT_MARKER.fullmatch(marker) is None:
             raise InitError(f"{place}.marker: ожидается adapter:<имя>")
-        if not isinstance(content, str):
-            raise InitError(f"{place}.content: ожидается строка")
 
         matches = [
             path
@@ -340,6 +345,38 @@ def _index_adapter_fragments(
             raise InitError(f"{place}.marker: {marker} задан дважды для {target}")
         bucket[marker] = content
     return index
+
+
+def _fragment_content(entry: dict[str, Any], place: str, request: Request) -> str:
+    has_content = "content" in entry
+    has_file = "content_file" in entry
+    if has_content == has_file:
+        raise InitError(f"{place}: нужен ровно один из content и content_file")
+    if has_content:
+        content = entry["content"]
+        if not isinstance(content, str):
+            raise InitError(f"{place}.content: ожидается строка")
+        return content
+
+    name = entry["content_file"]
+    if not isinstance(name, str) or not name.strip():
+        raise InitError(f"{place}.content_file: ожидается непустой путь")
+    if Path(name).is_absolute() or re.match(r"^[A-Za-z]:", name):
+        raise InitError(f"{place}.content_file: путь должен быть относительным: {name}")
+    base = request.target
+    if request.adapter is not None:
+        base = request.target / request.adapter.parent
+    path = (base / name).resolve()
+    try:
+        path.relative_to(request.target.resolve())
+    except ValueError as error:
+        raise InitError(f"{place}.content_file: путь выходит за каталог проекта: {name}") from error
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except OSError as error:
+        raise InitError(f"{place}.content_file: файл не читается: {name}: {error}") from error
+    except UnicodeDecodeError as error:
+        raise InitError(f"{place}.content_file: файл не в UTF-8: {name}") from error
 
 
 def _relative_to_docs(path: str, values: dict[str, Any]) -> str:

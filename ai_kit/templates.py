@@ -12,6 +12,7 @@ from typing import Any
 from ai_kit import schema
 from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
+from ai_kit.paths import KitRootError, kit_root
 from ai_kit.toml_io import TomlError, load as load_toml
 
 COMMAND_ROLES = ("test", "unit", "e2e", "lint", "build", "migrate")
@@ -491,6 +492,9 @@ def _body_is_empty(body: list[str]) -> bool:
         stripped = line.strip()
         if not stripped:
             continue
+        marker = MARKER.match(stripped)
+        if marker is not None and marker.group(1) == "adapter":
+            return False
         if stripped.startswith("<!--") and stripped.endswith("-->"):
             continue
         content.append(stripped)
@@ -534,10 +538,15 @@ def main(argv: list[str] | None = None) -> int:
     except UsageError as error:
         print(f"{error}\nИспользование: python -m ai_kit.templates --help", file=sys.stderr)
         return 2
-    root = Path.cwd()
     if "--help" in args:
         print(__doc__)
         return 0
+
+    try:
+        root = kit_root()
+    except KitRootError as error:
+        print(error, file=sys.stderr)
+        return 2
 
     try:
         documents = load_documents(root / "documents.toml", root)

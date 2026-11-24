@@ -1,0 +1,9 @@
+{
+  "setup": [
+    {"write": {"path": ".project/features/broken.md", "text": "# Функция\n\n## Назначение\n\nЧто-то делает.\n"}}
+  ],
+  "expect": [
+    {"code": "features", "severity": "error", "path": "broken.md", "message": "нет обязательного раздела: Логика"}
+  ],
+  "exit": 1
+}

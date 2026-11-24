@@ -241,6 +241,102 @@ class InitTests(unittest.TestCase):
         with self.assertRaises(InitError):
             generate(self.request(adapter=adapter))
 
+    def test_fragment_from_content_file(self) -> None:
+        adapter = self.target / "adapter.toml"
+        fragments = self.target / "fragments"
+        fragments.mkdir()
+        (fragments / "layers.md").write_text("| из файла | правило | триггер |\n", encoding="utf-8")
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "architecture.md"\n'
+            'marker = "adapter:layers"\ncontent_file = "fragments/layers.md"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        self.assertIn("| из файла | правило | триггер |", self.read(".project/architecture.md"))
+
+    def test_fragment_from_content_file_with_bom(self) -> None:
+        adapter = self.target / "adapter.toml"
+        fragments = self.target / "fragments"
+        fragments.mkdir()
+        (fragments / "layers.md").write_text(
+            "\ufeff| из файла | правило | триггер |\n", encoding="utf-8"
+        )
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "architecture.md"\n'
+            'marker = "adapter:layers"\ncontent_file = "fragments/layers.md"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(adapter=adapter))
+        architecture = self.read(".project/architecture.md")
+        self.assertNotIn("\ufeff", architecture)
+        self.assertIn("| из файла | правило | триггер |", architecture)
+
+    def test_fragment_content_and_file_are_exclusive(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "architecture.md"\n'
+            'marker = "adapter:layers"\ncontent = "x"\ncontent_file = "fragments/layers.md"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
+    def test_fragment_content_file_outside_project_rejected(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "architecture.md"\n'
+            'marker = "adapter:layers"\ncontent_file = "../escape.md"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
+    def test_fragment_content_file_absolute_rejected(self) -> None:
+        fragment = self.target / "escape.md"
+        fragment.write_text("| x | y | z |\n", encoding="utf-8")
+        adapter = self.target / "adapter.toml"
+        adapter.write_text(
+            '[[docs_fragments]]\ntarget = "architecture.md"\n'
+            f'marker = "adapter:layers"\ncontent_file = "{fragment.as_posix()}"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
+    def test_scratch_profile_records_not_applicable(self) -> None:
+        answers = self.target / "answers.toml"
+        answers.write_text(
+            ANSWERS
+            + '\n[[answer]]\nslot = "tests.framework"\nstatus = "not_applicable"\n'
+            'reason = "автотестов нет"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(profile=None, answers=answers))
+        parse(tomllib.loads(self.read("profile.toml")))
+        data = tomllib.loads(self.read("profile.toml"))
+        self.assertEqual(
+            data["not_applicable"],
+            [{"field": "tests.framework", "reason": "автотестов нет"}],
+        )
+
+    def test_not_applicable_removes_existing_unknown(self) -> None:
+        profile = self.target / "profile.toml"
+        profile.write_text(
+            EXAMPLE.read_text(encoding="utf-8")
+            + '\n[[unknowns]]\nfield = "automation.clients"\nquestion = "Какие клиенты агента?"\n',
+            encoding="utf-8",
+        )
+        answers = self.target / "answers.toml"
+        answers.write_text(
+            '[[answer]]\nslot = "automation.clients"\nstatus = "not_applicable"\n'
+            'reason = "клиентов агента нет"\n',
+            encoding="utf-8",
+        )
+        generate(self.request(profile=profile, answers=answers))
+        data = tomllib.loads(self.read("profile.toml"))
+        fields = [entry["field"] for entry in data.get("unknowns", [])]
+        self.assertNotIn("automation.clients", fields)
+
     def test_invalid_adapter_rule_is_rejected(self) -> None:
         adapter = self.target / "adapter.toml"
         adapter.write_text(
@@ -268,6 +364,14 @@ class InitTests(unittest.TestCase):
     def test_adapter_commands_reject_unknown_role(self) -> None:
         with self.assertRaises(InterviewError):
             apply_commands({}, {"commands": [{"role": "smoke", "command": "run"}]})
+
+    def test_adapter_commands_conflict_with_not_applicable(self) -> None:
+        data = {
+            "tests": {},
+            "not_applicable": [{"field": "tests.commands", "reason": "команд нет"}],
+        }
+        with self.assertRaises(InterviewError):
+            apply_commands(data, {"commands": [{"role": "test", "command": "run-tests"}]})
 
     def test_ask_cancel_writes_nothing(self) -> None:
         with patch("builtins.input", side_effect=["", "", "", "n"]), redirect_stdout(io.StringIO()):

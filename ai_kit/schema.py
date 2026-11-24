@@ -29,3 +29,14 @@ def is_evidence(node: dict[str, Any] | None) -> bool:
         return False
     properties = node.get("items", {}).get("properties", {})
     return "name" in properties and "provenance" in properties
+
+
+def is_required(path: str) -> bool:
+    current = profile_schema()
+    parts = path.split(".")
+    for part in parts[:-1]:
+        properties = current.get("properties")
+        if properties is None or part not in properties:
+            return False
+        current = properties[part]
+    return parts[-1] in current.get("required", [])

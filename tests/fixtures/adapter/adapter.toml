@@ -1,6 +1,5 @@
 # Фикстурный адаптер: вымышленный стек, проверяет форму контракта.
 id = "fixture"
-supported = ["1"]
 
 [[detect]]
 glob = "manifest.json"

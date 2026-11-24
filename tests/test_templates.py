@@ -182,6 +182,16 @@ class RenderTests(unittest.TestCase):
         output = self.rendered("agents", commands={})
         self.assertIn("`гейтов нет`", output)
 
+    def test_not_applicable_is_visible(self) -> None:
+        values = profile()
+        values["not_applicable"] = [
+            {"field": "automation.clients", "reason": "клиентов агента нет"}
+        ]
+        output = self.rendered("architecture", values=values)
+        self.assertIn("Осознанно неприменимо:", output)
+        self.assertIn("automation.clients", output)
+        self.assertIn("клиентов агента нет", output)
+
     def test_command_is_substituted(self) -> None:
         output = self.rendered("agents")
         self.assertIn("`run-unit`", output)
@@ -192,11 +202,11 @@ class RenderTests(unittest.TestCase):
         self.assertIn(row, output)
         self.assertIn("<!-- adapter:systems:begin -->", output)
 
-    def test_empty_fragment_removes_section(self) -> None:
+    def test_empty_fragment_keeps_section_with_marker(self) -> None:
         output = self.rendered("architecture")
-        self.assertNotIn("## Внешние системы", output)
-        self.assertNotIn("## Решения", output)
-        self.assertIn("## Слои", output)
+        self.assertIn("## Внешние системы", output)
+        self.assertIn("## Решения", output)
+        self.assertIn("<!-- adapter:systems:begin -->", output)
 
     def test_empty_generated_table_removes_section(self) -> None:
         output = self.rendered("registry")
@@ -210,11 +220,12 @@ class RenderTests(unittest.TestCase):
         self.assertIn("## Канон", output)
         self.assertIn(row, output)
 
-    def test_empty_list_removes_section(self) -> None:
+    def test_empty_list_keeps_adapter_section(self) -> None:
         values = copy.deepcopy(profile())
         values["layout"]["layers"] = []
         output = self.rendered("architecture", values=values)
-        self.assertNotIn("## Слои", output)
+        self.assertIn("## Слои", output)
+        self.assertIn("<!-- adapter:layers:begin -->", output)
 
     def test_disabled_tiers_remove_section(self) -> None:
         values = copy.deepcopy(profile())

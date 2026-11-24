@@ -27,7 +27,7 @@ jobs:
       - name: Module entry point
         run: python -m ai_kit
       - name: Editable install from another directory
-        run: python -c "import shutil,subprocess,tempfile; exe=shutil.which('ai-kit'); assert exe; r=subprocess.run([exe,'prompt'], cwd=tempfile.mkdtemp(), capture_output=True, text=True); assert r.returncode == 0, r.stderr"
+        run: python -c "import shutil,subprocess,tempfile; exe=shutil.which('ai-kit'); assert exe; r=subprocess.run([exe,'prompt'], cwd=tempfile.mkdtemp(), capture_output=True, text=True, encoding='utf-8', errors='replace'); assert r.returncode == 0, r.stderr"
       - name: Unit tests
         run: python -m unittest discover -s tests -p "test_*.py"
       - name: Profile
@@ -43,4 +43,4 @@ jobs:
       - name: Non-editable install is rejected
         run: |
           python -m pip install . --force-reinstall --disable-pip-version-check
-          python -c "import subprocess,sys,tempfile; r=subprocess.run([sys.executable,'-m','ai_kit.prompt'], cwd=tempfile.mkdtemp(), capture_output=True, text=True); assert r.returncode == 2, r.returncode; assert 'editable' in r.stderr"
+          python -c "import subprocess,sys,tempfile; r=subprocess.run([sys.executable,'-m','ai_kit.prompt'], cwd=tempfile.mkdtemp(), capture_output=True, text=True, encoding='utf-8', errors='replace'); assert r.returncode == 2, r.returncode; assert 'editable' in r.stderr"

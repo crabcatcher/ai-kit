@@ -140,7 +140,7 @@ python -m ai_kit.profile --print-schema
 python -m ai_kit.templates --check
 python -m ai_kit.templates --render readme --profile profiles/example.toml
 python -m ai_kit.interview --check --adapter tests/fixtures/adapter/adapter.toml
-python -m ai_kit.adapter validate --adapter tests/fixtures/adapter/adapter.toml --profile profiles/example.toml
+python -m ai_kit.adapter validate --adapter tests/fixtures/adapter/adapter.toml --profile profiles/example.toml --probes
 python -m ai_kit.interview --plan --profile profiles/example.toml --adapter tests/fixtures/adapter/adapter.toml
 python -m ai_kit.init --profile profiles/example.toml --adapter tests/fixtures/adapter/adapter.toml --dry-run
 ```

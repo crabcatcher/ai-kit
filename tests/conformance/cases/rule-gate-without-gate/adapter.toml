@@ -1,0 +1,8 @@
+[[rules]]
+id = "A1"
+text = "Инвариант проверки"
+label = "гейт"
+executor = "case-check"
+catcher = "гейт"
+owner = "владелец проекта"
+trigger = "—"

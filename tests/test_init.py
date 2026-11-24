@@ -186,6 +186,26 @@ class InitTests(unittest.TestCase):
         generate(self.request())
         self.assertIn("| Вход | `features/login.md` |", self.read(".project/FEATURES.md"))
 
+    def test_feature_with_bom_is_indexed(self) -> None:
+        generate(self.request())
+        path = self.target / ".project" / "features" / "bom.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xef\xbb\xbf# \xd0\x92\xd1\x85\xd0\xbe\xd0\xb4\n")
+        generate(self.request())
+        self.assertIn("| Вход | `features/bom.md` |", self.read(".project/FEATURES.md"))
+
+    def test_unreadable_document_is_init_error(self) -> None:
+        generate(self.request())
+        (self.target / ".project" / "architecture.md").write_bytes(b"\xff\xfe\x00")
+        with self.assertRaises(InitError):
+            generate(self.request())
+
+    def test_fragment_list_of_wrong_type_is_rejected(self) -> None:
+        adapter = self.target / "adapter.toml"
+        adapter.write_text("docs_fragments = 5\n", encoding="utf-8")
+        with self.assertRaises(InitError):
+            generate(self.request(adapter=adapter))
+
     def test_adapter_gaps_are_rendered_in_debt(self) -> None:
         adapter = self.target / "adapter.toml"
         adapter.write_text(

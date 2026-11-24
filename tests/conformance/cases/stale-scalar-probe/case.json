@@ -1,0 +1,13 @@
+{
+  "adapter": "adapter.toml",
+  "setup": [
+    {"write": {"path": "manifest.json", "text": "{\"dependencies\": {}}\n"}}
+  ],
+  "mutations": [
+    {"replace": {"path": "profile.toml", "old": "frameworks = []", "new": "frameworks = [{ name = \"Express\", version = \"1\", evidence = \"manifest.json\", provenance = \"probe\" }]"}}
+  ],
+  "expect": [
+    {"code": "stale", "severity": "warning", "path": "stack.frameworks", "message": "не подтверждены"}
+  ],
+  "exit": 0
+}

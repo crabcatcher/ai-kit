@@ -37,7 +37,7 @@ def validate(
     if "id" in adapter and (not isinstance(adapter["id"], str) or not adapter["id"].strip()):
         diagnostics.append(Diagnostic("adapter", "error", "id", "ожидается непустая строка"))
 
-    values: dict[str, Any] = {"docs": {"dir": ".project"}}
+    values: dict[str, Any] = {"docs": {"dir": init.DEFAULT_DOCS_DIR}}
     if profile_path is not None:
         try:
             values = load_toml(profile_path)
@@ -73,8 +73,8 @@ def validate(
     parsed_inputs = _inputs(values, adapter, diagnostics)
     _get_gaps(adapter, diagnostics)
     _questions(root, adapter, diagnostics)
-    _fragments(adapter, values, documents, adapter_path, project, root, diagnostics)
-    _inputs_features(parsed_inputs, values, project, diagnostics)
+    missing_features = _fragments(adapter, values, documents, adapter_path, project, root, diagnostics)
+    _inputs_features(parsed_inputs, values, project, missing_features, diagnostics)
     unique: dict[tuple[str, str, str, str], Diagnostic] = {}
     for item in diagnostics:
         unique[(item.code, item.severity, item.path, item.message)] = item
@@ -86,10 +86,15 @@ def _with_docs(values: dict[str, Any], diagnostics: list[Diagnostic]) -> dict[st
     if isinstance(docs, dict) and isinstance(docs.get("dir"), str) and docs["dir"].strip():
         return values
     diagnostics.append(
-        Diagnostic("profile", "warning", "docs.dir", "каталог документов не задан; пути проверяются от .project")
+        Diagnostic(
+            "profile",
+            "warning",
+            "docs.dir",
+            f"каталог документов не задан; пути проверяются от {init.DEFAULT_DOCS_DIR}",
+        )
     )
     result = dict(values)
-    result["docs"] = {"dir": ".project"}
+    result["docs"] = {"dir": init.DEFAULT_DOCS_DIR}
     return result
 
 
@@ -190,6 +195,17 @@ def _gates(
                     f"нет строки A с формулировкой «{gate.invariant}»",
                 )
             )
+    gate_texts = {gate.invariant for gate in gate_list}
+    for rule in adapter_rules:
+        if rule.label in ("гейт", "гейт частичный") and rule.text not in gate_texts:
+            diagnostics.append(
+                Diagnostic(
+                    "reference",
+                    "error",
+                    f"rules/{rule.id}",
+                    f"правило {rule.id} помечено «{rule.label}», но гейта нет",
+                )
+            )
 
 
 def _inputs(
@@ -204,24 +220,27 @@ def _inputs(
     if problems:
         return []
     parsed = inputs.parse(adapter.get("inputs", []))
-    if "inputs" in values:
-        try:
-            existing = inputs.parse(values["inputs"])
-        except inputs.InputError as error:
-            diagnostics.extend(
-                Diagnostic("profile", "error", path, message) for path, message in error.errors
+    if "inputs" not in values:
+        return parsed
+    try:
+        existing = inputs.parse(values["inputs"])
+    except inputs.InputError as error:
+        diagnostics.extend(
+            Diagnostic("profile", "error", path, message) for path, message in error.errors
+        )
+        return parsed
+    if "inputs" in adapter and sorted(existing, key=lambda item: item.id) != sorted(
+        parsed, key=lambda item: item.id
+    ):
+        diagnostics.append(
+            Diagnostic(
+                "reference",
+                "error",
+                "inputs",
+                "inputs профиля и адаптера расходятся: профиль — источник истины",
             )
-            return parsed
-        if sorted(existing, key=lambda item: item.id) != sorted(parsed, key=lambda item: item.id):
-            diagnostics.append(
-                Diagnostic(
-                    "reference",
-                    "error",
-                    "inputs",
-                    "inputs профиля и адаптера расходятся: профиль — источник истины",
-                )
-            )
-    return parsed
+        )
+    return existing
 
 
 def _get_gaps(adapter: dict[str, Any], diagnostics: list[Diagnostic]) -> None:
@@ -248,23 +267,41 @@ def _fragments(
     project: Path,
     root: Path,
     diagnostics: list[Diagnostic],
-) -> None:
+) -> set[str]:
     request = init.Request(
         target=project,
         kit_root=root,
         adapter=adapter_path.resolve(),
     )
-    for index, entry in enumerate(adapter.get("docs_fragments", [])):
+    entries = adapter.get("docs_fragments", [])
+    if not isinstance(entries, list):
+        diagnostics.append(Diagnostic("adapter", "error", "docs_fragments", "ожидается список"))
+        return set()
+    invalid: set[int] = set()
+    for index, entry in enumerate(entries):
         place = f"docs_fragments[{index}]"
+        before = len(diagnostics)
         if not isinstance(entry, dict):
+            diagnostics.append(Diagnostic("fragment", "error", place, "ожидается объект"))
+            invalid.add(index)
             continue
         marker = entry.get("marker")
+        target = entry.get("target")
+        marker_ok = isinstance(marker, str) and init.FRAGMENT_MARKER.fullmatch(marker) is not None
+        extra = set(entry) - {"target", "marker", "content", "content_file"}
+        for key in sorted(extra):
+            diagnostics.append(Diagnostic("fragment", "error", f"{place}.{key}", "неизвестное поле"))
+        if not isinstance(target, str) or not target:
+            diagnostics.append(Diagnostic("fragment", "error", f"{place}.target", "ожидается непустая строка"))
+        if not marker_ok:
+            diagnostics.append(Diagnostic("fragment", "error", f"{place}.marker", "ожидается adapter:<имя>"))
         try:
             content = init.fragment_content(entry, place, request)
         except init.InitError as error:
             diagnostics.append(Diagnostic("fragment", "error", place, str(error)))
+            invalid.add(index)
             continue
-        if isinstance(marker, str):
+        if marker_ok:
             checked = _fragment_conflict(
                 entry, marker, content, documents, values, project, root, diagnostics
             )
@@ -273,13 +310,15 @@ def _fragments(
                     templates.validate_fragment(marker, content, place)
                 except templates.TemplateError as error:
                     diagnostics.append(Diagnostic("fragment", "error", place, str(error)))
-    filtered = _without_missing_features(adapter, values, project, diagnostics)
-    if filtered is None:
-        return
+        if len(diagnostics) > before:
+            invalid.add(index)
+
+    filtered, missing = _without_missing_features(adapter, values, project, invalid)
     try:
         init.index_adapter_fragments(documents, values, filtered, request)
     except init.InitError as error:
         diagnostics.append(Diagnostic("fragment", "error", "docs_fragments", str(error)))
+    return missing
 
 
 def _fragment_conflict(
@@ -295,22 +334,36 @@ def _fragment_conflict(
     target = entry.get("target")
     if not isinstance(target, str):
         return False
+    matches: list[tuple[templates.Document, str]] = []
     for document in documents:
         try:
             relative = templates.document_path(document, values)
         except templates.TemplateError as error:
             diagnostics.append(Diagnostic("fragment", "error", document.id, str(error)))
             return True
-        if target in (document.id, relative, _relative_to_docs(relative, values)):
-            try:
-                source = (root / document.template).read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as error:
-                diagnostics.append(
-                    Diagnostic("fragment", "error", document.template, f"шаблон не читается: {error}")
-                )
-                return True
-            _fill_check(source, marker, content, document.template, diagnostics)
+        if target in (document.id, relative, init.relative_to_docs(relative, values)):
+            matches.append((document, relative))
+    if len(matches) > 1:
+        diagnostics.append(
+            Diagnostic(
+                "fragment",
+                "error",
+                "docs_fragments",
+                f"цель {target} не указывает ровно один документ: {', '.join(sorted(path for _, path in matches))}",
+            )
+        )
+        return True
+    if matches:
+        document, relative = matches[0]
+        try:
+            source = (root / document.template).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            diagnostics.append(
+                Diagnostic("fragment", "error", document.template, f"шаблон не читается: {error}")
+            )
             return True
+        _fill_check(source, marker, content, document.template, diagnostics)
+        return True
     docs_dir = values.get("docs", {}).get("dir")
     if not isinstance(docs_dir, str) or not docs_dir:
         return False
@@ -345,26 +398,21 @@ def _fill_check(
         diagnostics.append(Diagnostic("fragment", "error", where, str(error)))
 
 
-def _relative_to_docs(path: str, values: dict[str, Any]) -> str:
-    docs_dir = values.get("docs", {}).get("dir")
-    if not isinstance(docs_dir, str) or not docs_dir:
-        return path
-    prefix = docs_dir.rstrip("/") + "/"
-    return path[len(prefix):] if path.startswith(prefix) else path
-
-
 def _without_missing_features(
     adapter: dict[str, Any],
     values: dict[str, Any],
     project: Path,
-    diagnostics: list[Diagnostic],
-) -> dict[str, Any] | None:
+    skip: set[int] | None = None,
+) -> tuple[dict[str, Any], set[str]]:
     docs_dir = values.get("docs", {}).get("dir")
-    if not isinstance(docs_dir, str) or not docs_dir:
-        return adapter
     entries = adapter.get("docs_fragments", [])
+    skipped = skip or set()
+    if not isinstance(docs_dir, str) or not docs_dir:
+        kept = [entry for index, entry in enumerate(entries) if index not in skipped]
+        return dict(adapter, docs_fragments=kept), set()
     kept = []
-    for entry in entries:
+    missing: set[str] = set()
+    for index, entry in enumerate(entries):
         target = entry.get("target") if isinstance(entry, dict) else None
         if isinstance(target, str):
             name = target
@@ -375,39 +423,29 @@ def _without_missing_features(
                 file_name = name.split("/", 1)[1]
                 path = project / docs_dir / "features" / file_name
                 if "/" not in file_name and not path.is_file():
-                    diagnostics.append(
-                        Diagnostic(
-                            "fragment",
-                            "warning",
-                            target,
-                            "файла функции нет; создайте его вручную или уберите фрагмент",
-                        )
-                    )
+                    missing.add(name)
                     continue
-        kept.append(entry)
-    if len(kept) == len(entries):
-        return adapter
-    filtered = dict(adapter)
-    filtered["docs_fragments"] = kept
-    return filtered
+        if index not in skipped:
+            kept.append(entry)
+    return dict(adapter, docs_fragments=kept), missing
 
 
 def _inputs_features(
     parsed: list[inputs.Input],
     values: dict[str, Any],
     project: Path,
+    fragment_missing: set[str],
     diagnostics: list[Diagnostic],
 ) -> None:
     docs_dir = values.get("docs", {}).get("dir")
-    if not isinstance(docs_dir, str) or not docs_dir:
-        return
-    missing: set[str] = set()
-    for entry in parsed:
-        if not entry.feature:
-            continue
-        path = project / docs_dir / entry.feature
-        if not path.is_file():
-            missing.add(entry.feature)
+    missing: set[str] = set(fragment_missing)
+    if isinstance(docs_dir, str) and docs_dir:
+        for entry in parsed:
+            if not entry.feature:
+                continue
+            path = project / docs_dir / entry.feature
+            if not path.is_file():
+                missing.add(entry.feature)
     if missing:
         names = ", ".join(sorted(missing))
         diagnostics.append(

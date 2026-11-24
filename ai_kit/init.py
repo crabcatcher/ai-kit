@@ -331,7 +331,10 @@ def index_adapter_fragments(
     paths = {document.id: templates.document_path(document, values) for document in documents}
     by_path = {templates.document_path(document, values): document for document in documents}
     index: dict[str, dict[str, str]] = {}
-    for position, entry in enumerate(adapter.get("docs_fragments", [])):
+    entries = adapter.get("docs_fragments", [])
+    if not isinstance(entries, list):
+        raise InitError("docs_fragments: ожидается список")
+    for position, entry in enumerate(entries):
         place = f"docs_fragments[{position}]"
         if not isinstance(entry, dict):
             raise InitError(f"{place}: ожидается объект")
@@ -349,7 +352,7 @@ def index_adapter_fragments(
         matches = [
             path
             for document_id, path in paths.items()
-            if target in (document_id, path, _relative_to_docs(path, values))
+            if target in (document_id, path, relative_to_docs(path, values))
         ]
         if len(matches) > 1:
             raise InitError(f"{place}.target: {target} не указывает ровно один документ")
@@ -434,7 +437,7 @@ def fragment_content(entry: dict[str, Any], place: str, request: Request) -> str
         raise InitError(f"{place}.content_file: файл не в UTF-8: {name}") from error
 
 
-def _relative_to_docs(path: str, values: dict[str, Any]) -> str:
+def relative_to_docs(path: str, values: dict[str, Any]) -> str:
     docs_dir = values.get("docs", {}).get("dir")
     if not isinstance(docs_dir, str) or not docs_dir:
         return path
@@ -465,7 +468,15 @@ def _render_all(plan: Plan, request: Request) -> list[tuple[Path, str]]:
         rendered.add(relative)
         path = _safe_path(request.target, relative, document.id)
         source = (request.kit_root / document.template).read_text(encoding="utf-8")
-        existing = path.read_text(encoding="utf-8") if path.is_file() else None
+        if path.is_file():
+            try:
+                existing = path.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeDecodeError) as error:
+                raise InitError(
+                    f"{_display(request.target, path)}: документ не читается: {error}"
+                ) from error
+        else:
+            existing = None
         fragments = _document_fragments(document, source, existing, plan)
         context = templates.RenderContext(
             document=document,
@@ -580,7 +591,11 @@ def _feature_rows(target: Path, values: dict[str, Any]) -> list[tuple[str, str]]
     rows: list[tuple[str, str]] = []
     for path in sorted(folder.glob("*.md")):
         title = path.stem
-        for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            content = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            content = ""
+        for line in content.splitlines():
             if line.startswith("# "):
                 title = line[2:].strip()
                 break

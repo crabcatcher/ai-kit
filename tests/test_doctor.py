@@ -130,6 +130,15 @@ class DoctorTests(unittest.TestCase):
         data.setdefault("stack", {}).setdefault("tools", []).append(entry)
         path.write_text(toml_writer.dumps(data), encoding="utf-8")
 
+    def add_evidence(self, field: str, name: str) -> None:
+        section, key = field.split(".", 1)
+        path = self.target / "profile.toml"
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data.setdefault(section, {}).setdefault(key, []).append(
+            {"name": name, "version": "1", "evidence": "manifest.json", "provenance": "probe"}
+        )
+        path.write_text(toml_writer.dumps(data), encoding="utf-8")
+
     def append(self, relative: str, text: str) -> None:
         path = self.target / relative
         path.write_text(path.read_text(encoding="utf-8") + text, encoding="utf-8")
@@ -283,7 +292,7 @@ class DoctorTests(unittest.TestCase):
             report.to_table(),
         )
 
-    def test_stale_skipped_when_other_probe_on_field(self) -> None:
+    def test_stale_mixed_field_is_checked(self) -> None:
         (self.target / "manifest.json").write_text(
             '{"dependencies": {"current": "1"}}', encoding="utf-8"
         )
@@ -299,7 +308,112 @@ class DoctorTests(unittest.TestCase):
         self.make(adapter)
         self.add_tool("stale")
         report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "stale" and "проба не подтвердила: stale" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_stale_names_are_case_insensitive(self) -> None:
+        (self.target / "manifest.json").write_text(
+            '{"dependencies": {"express": "4"}}', encoding="utf-8"
+        )
+        adapter = self.write_adapter(
+            "[[probes]]\n"
+            'id = "express"\n'
+            'globs = ["manifest.json"]\n'
+            'field = "stack.frameworks"\n'
+            'name = "Express"\n'
+            'extract = "json:dependencies.express"\n'
+            'provenance = "probe"\n'
+        )
+        self.make(adapter)
+        self.add_evidence("stack.frameworks", "express")
+        report = self.doctor(adapter)
         self.assertFalse(any(item.code == "stale" for item in report.diagnostics), report.to_table())
+
+    def test_stale_scalar_probe_warns(self) -> None:
+        (self.target / "manifest.json").write_text('{"dependencies": {}}', encoding="utf-8")
+        adapter = self.write_adapter(
+            "[[probes]]\n"
+            'id = "express"\n'
+            'globs = ["manifest.json"]\n'
+            'field = "stack.frameworks"\n'
+            'name = "Express"\n'
+            'extract = "json:dependencies.express"\n'
+            'provenance = "probe"\n'
+        )
+        self.make(adapter)
+        self.add_evidence("stack.frameworks", "Express")
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "stale" and "Express" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_feature_dash_section_warns(self) -> None:
+        self.make()
+        path = self.target / ".project" / "features" / "dash.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            FEATURE.replace("{rows}", "| `x` | 200 | public | browser |").replace("Нет.", "—"),
+            encoding="utf-8",
+        )
+        self.make()
+        report = self.doctor()
+        self.assertTrue(
+            any(item.code == "placeholder" and "заглушкой" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_unreadable_registry_is_diagnostic(self) -> None:
+        self.make()
+        (self.target / ".project" / "registry.md").write_bytes(b"\xff\xfe\x00")
+        report = self.doctor()
+        self.assertTrue(
+            any(
+                item.code == "document" and "не читается" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+        self.assertFalse(
+            any(item.code == "registry" and "документа реестра нет" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_rule_gate_without_gate_entry(self) -> None:
+        adapter = self.write_adapter(
+            '[[rules]]\nid = "A1"\ntext = "Инвариант"\nlabel = "гейт"\n'
+            'executor = "check"\ncatcher = "гейт"\nowner = "владелец"\ntrigger = "—"\n'
+        )
+        self.make(adapter)
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "registry" and "гейта нет" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_broken_rules_do_not_cascade_to_gates(self) -> None:
+        adapter = self.write_adapter(
+            '[[rules]]\nid = "A1"\ntext = "Инвариант"\nlabel = "гейт"\n'
+            'executor = "check"\ncatcher = "гейт"\nowner = "владелец"\ntrigger = "—"\n'
+            '[[gates]]\nid = "case-check"\ninvariant = "Инвариант"\n'
+            f'command = [{PYTHON}, "-c", "pass"]\non_unavailable = "gap"\n'
+        )
+        self.make(adapter)
+        adapter.write_text(
+            adapter.read_text(encoding="utf-8").replace('trigger = "—"\n', ""),
+            encoding="utf-8",
+        )
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(item.code == "registry" and "trigger" in item.path for item in report.diagnostics),
+            report.to_table(),
+        )
+        self.assertFalse(
+            any("нет строки реестра с инвариантом" in item.message for item in report.diagnostics),
+            report.to_table(),
+        )
 
     def test_stale_ignores_entry_without_evidence(self) -> None:
         (self.target / "manifest.json").write_text(

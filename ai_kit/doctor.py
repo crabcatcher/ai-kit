@@ -71,6 +71,7 @@ def run(request: DoctorRequest) -> Report:
     diagnostics.extend(_stale_diagnostics(adapter, parsed, request))
     adapter_rules, rule_diagnostics = _adapter_rules(adapter)
     diagnostics.extend(rule_diagnostics)
+    rules_ok = not rule_diagnostics
     diagnostics.extend(_registry_diagnostics(documents, request, parsed, adapter_rules))
     diagnostics.extend(_baseline_diagnostics(request, _rule_ids(request, adapter_rules, parsed)))
     diagnostics.extend(_precommit_diagnostics(request, parsed))
@@ -79,7 +80,7 @@ def run(request: DoctorRequest) -> Report:
 
     gate_list, gate_diagnostics = gates.load_gates(adapter or {})
     diagnostics.extend(gate_diagnostics)
-    diagnostics.extend(_gate_coverage(gate_list, adapter_rules))
+    diagnostics.extend(_gate_coverage(gate_list, adapter_rules, rules_ok))
     if gate_list:
         if request.gates:
             baseline_path = _inside(request.root, request.baseline)
@@ -288,7 +289,8 @@ def _registry_diagnostics(
 
     registry_text = _document_text(documents, request, parsed, "registry")
     if registry_text is None:
-        diagnostics.append(Diagnostic("registry", "error", "registry", "документа реестра нет"))
+        if _document_path(documents, request, parsed, "registry") is None:
+            diagnostics.append(Diagnostic("registry", "error", "registry", "документа реестра нет"))
     else:
         for row in canon + adapter_rules + parsed.rules:
             if f"| {row.id} |" not in registry_text:
@@ -306,12 +308,12 @@ def _registry_diagnostics(
     return diagnostics
 
 
-def _document_text(
+def _document_path(
     documents: list[templates.Document],
     request: DoctorRequest,
     parsed: profile.Profile,
     document_id: str,
-) -> str | None:
+) -> Path | None:
     document = next((item for item in documents if item.id == document_id), None)
     if document is None:
         return None
@@ -323,9 +325,21 @@ def _document_text(
     path = _inside(request.root, relative)
     if path is None or not path.is_file():
         return None
+    return path
+
+
+def _document_text(
+    documents: list[templates.Document],
+    request: DoctorRequest,
+    parsed: profile.Profile,
+    document_id: str,
+) -> str | None:
+    path = _document_path(documents, request, parsed, document_id)
+    if path is None:
+        return None
     try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
+        return path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
         return None
 
 
@@ -419,6 +433,12 @@ def _features_diagnostics(
             if section not in content:
                 diagnostics.append(
                     Diagnostic("features", "error", relative, f"нет обязательного раздела: {section[3:]}")
+                )
+                continue
+            body = _section_text(content, section)[len(section):].strip()
+            if body and set(body) <= set("—-–|: \n\t"):
+                diagnostics.append(
+                    Diagnostic("placeholder", "warning", relative, f"раздел {section[3:]} заполнен заглушкой")
                 )
         for error in templates.validate_markers(content):
             diagnostics.append(Diagnostic("marker", "error", relative, error))
@@ -572,89 +592,45 @@ def _stale_diagnostics(
         probes = interview.load_probes(adapter)
     except interview.InterviewError as error:
         return [Diagnostic("adapter", "error", "probes", str(error))]
-
-    keys_fields = {
-        probe.field
-        for probe in probes
-        if probe.extract.split(":", 1)[0] in ("json-keys", "toml-keys")
-    }
-    normal_fields = {
-        probe.field
-        for probe in probes
-        if probe.extract.split(":", 1)[0] not in ("json-keys", "toml-keys")
-    }
-    ambiguous = keys_fields & normal_fields
-    keys_probes = [probe for probe in probes if probe.field in keys_fields and probe.field not in ambiguous]
-    normal_probes = [probe for probe in probes if probe.field not in keys_fields]
-    if not keys_probes and not normal_probes:
+    if not probes:
         return []
-
+    stack_probes = [probe for probe in probes if probe.field.startswith("stack.")]
+    if not stack_probes:
+        return []
+    hits, misses = interview.run_probes(request.root, stack_probes)
+    names_by_field: dict[str, set[str]] = {}
+    for hit in hits:
+        if hit.name:
+            names_by_field.setdefault(hit.field, set()).add(hit.name.casefold())
+    reasons_by_field: dict[str, list[str]] = {}
+    for miss in misses:
+        reasons_by_field.setdefault(miss.field, []).append(miss.reason)
     diagnostics: list[Diagnostic] = []
-    if keys_probes:
-        hits, misses = interview.run_probes(request.root, keys_probes)
-        hit_names: dict[str, set[str]] = {}
-        for hit in hits:
-            hit_names.setdefault(hit.probe_id, set()).add(hit.name or "")
-        miss_reasons = {miss.probe_id: miss.reason for miss in misses}
-        for probe in keys_probes:
-            names = _stack_names(parsed, probe.field)
-            if probe.id in miss_reasons:
-                if names:
-                    diagnostics.append(
-                        Diagnostic(
-                            "stale",
-                            "warning",
-                            probe.field,
-                            f"проба {probe.id} не нашла значение ({miss_reasons[probe.id]}); "
-                            "старые факты поля не подтверждены: " + ", ".join(sorted(names)),
-                        )
-                    )
-                continue
-            stale = names - hit_names.get(probe.id, set())
-            if stale:
-                diagnostics.append(
-                    Diagnostic(
-                        "stale",
-                        "warning",
-                        probe.field,
-                        f"проба {probe.id} не подтвердила: " + ", ".join(sorted(stale)),
-                    )
+    for field in sorted({probe.field for probe in stack_probes}):
+        names = _stack_names(parsed, field)
+        if not names:
+            continue
+        confirmed = names_by_field.get(field, set())
+        stale = [name for name in names if name.casefold() not in confirmed]
+        if confirmed and stale:
+            diagnostics.append(
+                Diagnostic(
+                    "stale",
+                    "warning",
+                    field,
+                    "проба не подтвердила: " + ", ".join(sorted(stale)),
                 )
-
-    if normal_probes:
-        hits, misses = interview.run_probes(request.root, normal_probes)
-        names_by_field: dict[str, set[str]] = {}
-        for hit in hits:
-            if hit.name:
-                names_by_field.setdefault(hit.field, set()).add(hit.name)
-        reasons_by_field: dict[str, list[str]] = {}
-        for miss in misses:
-            reasons_by_field.setdefault(miss.field, []).append(miss.reason)
-        for field in sorted(normal_fields - keys_fields):
-            names = _stack_names(parsed, field)
-            if not names:
-                continue
-            confirmed = names_by_field.get(field, set())
-            stale = names - confirmed
-            if confirmed and stale:
-                diagnostics.append(
-                    Diagnostic(
-                        "stale",
-                        "warning",
-                        field,
-                        "проба не подтвердила: " + ", ".join(sorted(stale)),
-                    )
+            )
+        elif not confirmed and reasons_by_field.get(field):
+            diagnostics.append(
+                Diagnostic(
+                    "stale",
+                    "warning",
+                    field,
+                    "проба не нашла значение; старые факты поля не подтверждены: "
+                    + ", ".join(sorted(names)),
                 )
-            elif not confirmed and reasons_by_field.get(field):
-                diagnostics.append(
-                    Diagnostic(
-                        "stale",
-                        "warning",
-                        field,
-                        "проба не нашла значение; старые факты поля не подтверждены: "
-                        + ", ".join(sorted(names)),
-                    )
-                )
+            )
     return diagnostics
 
 
@@ -733,7 +709,13 @@ def _declared_gaps(adapter: dict[str, Any]) -> list[Diagnostic]:
     ]
 
 
-def _gate_coverage(gate_list: list[gates.Gate], adapter_rules: list[rules.Rule]) -> list[Diagnostic]:
+def _gate_coverage(
+    gate_list: list[gates.Gate],
+    adapter_rules: list[rules.Rule],
+    rules_ok: bool,
+) -> list[Diagnostic]:
+    if not rules_ok:
+        return []
     diagnostics: list[Diagnostic] = []
     texts = {rule.text for rule in adapter_rules}
     for gate in gate_list:
@@ -744,6 +726,17 @@ def _gate_coverage(gate_list: list[gates.Gate], adapter_rules: list[rules.Rule])
                     "error",
                     gate.id,
                     f"у гейта {gate.id} нет строки реестра с инвариантом «{gate.invariant}»",
+                )
+            )
+    gate_texts = {gate.invariant for gate in gate_list}
+    for rule in adapter_rules:
+        if rule.label in ("гейт", "гейт частичный") and rule.text not in gate_texts:
+            diagnostics.append(
+                Diagnostic(
+                    "registry",
+                    "error",
+                    rule.id,
+                    f"правило {rule.id} помечено «{rule.label}», но гейта нет",
                 )
             )
     return diagnostics

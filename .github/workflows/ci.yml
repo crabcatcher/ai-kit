@@ -35,7 +35,7 @@ jobs:
       - name: Templates
         run: python -m ai_kit.templates --check
       - name: Adapter
-        run: python -m ai_kit.adapter validate --adapter tests/fixtures/adapter/adapter.toml --profile profiles/example.toml
+        run: python -m ai_kit.adapter validate --adapter tests/fixtures/adapter/adapter.toml --profile profiles/example.toml --probes
       - name: Interview
         run: python -m ai_kit.interview --check --adapter tests/fixtures/adapter/adapter.toml
       - name: Generator dry run

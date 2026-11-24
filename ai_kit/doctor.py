@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ai_kit import gates, profile, rules, templates
+from ai_kit import baseline, gates, precommit, profile, rules, templates
 from ai_kit.console import configure_console
 from ai_kit.diagnostics import Diagnostic, Report
 
@@ -54,6 +54,8 @@ def run(request: DoctorRequest) -> Report:
     adapter_rules, rule_diagnostics = _adapter_rules(adapter)
     diagnostics.extend(rule_diagnostics)
     diagnostics.extend(_registry_diagnostics(documents, request, parsed, adapter_rules))
+    diagnostics.extend(_baseline_diagnostics(request, _rule_ids(request, adapter_rules, parsed)))
+    diagnostics.extend(_precommit_diagnostics(request, parsed))
 
     gate_list, gate_diagnostics = gates.load_gates(adapter or {})
     diagnostics.extend(gate_diagnostics)
@@ -239,6 +241,45 @@ def _document_text(
         return path.read_text(encoding="utf-8")
     except OSError:
         return None
+
+
+def _rule_ids(
+    request: DoctorRequest,
+    adapter_rules: list[rules.Rule],
+    parsed: profile.Profile,
+) -> set[str]:
+    ids = {rule.id for rule in adapter_rules} | {rule.id for rule in parsed.rules}
+    try:
+        ids.update(rule.id for rule in rules.load_canon(request.kit_root / "canon" / "registry.md"))
+    except (OSError, ValueError):
+        pass
+    return ids
+
+
+def _baseline_diagnostics(request: DoctorRequest, rule_ids: set[str]) -> list[Diagnostic]:
+    path = request.root / "baseline.toml"
+    if not path.is_file():
+        return []
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        return [Diagnostic("baseline", "error", "baseline.toml", f"baseline не читается: {error}")]
+    return [
+        Diagnostic("baseline", "error", f"baseline.toml:{place}" if place else "baseline.toml", message)
+        for place, message in baseline.violation_errors(data, rule_ids)
+    ]
+
+
+def _precommit_diagnostics(request: DoctorRequest, parsed: profile.Profile) -> list[Diagnostic]:
+    if not parsed.automation.pre_commit:
+        return []
+    diagnostics: list[Diagnostic] = []
+    for relative in (precommit.PRE_COMMIT, precommit.HOOK):
+        if not (request.root / relative).is_file():
+            diagnostics.append(
+                Diagnostic("precommit", "error", relative, "нет артефакта проверки перед коммитом")
+            )
+    return diagnostics
 
 
 def _gate_coverage(gate_list: list[gates.Gate], adapter_rules: list[rules.Rule]) -> list[Diagnostic]:

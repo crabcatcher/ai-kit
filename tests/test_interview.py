@@ -1,3 +1,4 @@
+import json
 import tomllib
 import unittest
 from pathlib import Path
@@ -8,20 +9,25 @@ from ai_kit.interview import (
     MERGED_LIMIT,
     UNIVERSAL_LIMIT,
     Answer,
+    Bank,
     InterviewError,
+    Prepared,
     Probe,
     Question,
     apply_answers,
     apply_probe_hits,
+    describe_slot,
     finish,
     is_known,
     load_adapter_questions,
+    load_answers,
     load_probes,
     load_questions,
     merge_questions,
     parse_answers,
     parse_probes,
     parse_questions,
+    plan_payload,
     prepare,
     report,
     run_probes,
@@ -347,6 +353,11 @@ class AnswerTests(unittest.TestCase):
         with self.assertRaises(InterviewError):
             apply_answers({}, [item], [item], [Answer("stack.runtime")])
 
+    def test_evidence_answer_without_version_requests_proof(self) -> None:
+        item = question(id="runtime", slots=("stack.runtime",))
+        _, unknowns, _ = apply_answers({}, [item], [item], [Answer("stack.runtime", name="runtime")])
+        self.assertEqual(unknowns[0]["field"], "stack.runtime.version")
+
 
 class AnswerParsingTests(unittest.TestCase):
     def assert_error(self, entries: list, path: str) -> None:
@@ -396,6 +407,16 @@ class AnswerParsingTests(unittest.TestCase):
             "answer[0]",
         )
 
+    def test_json_answers_file(self) -> None:
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "answers.json"
+            path.write_text(
+                json.dumps({"answer": [{"slot": "project.purpose", "value": "продукт"}]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            answers = load_answers(path)
+        self.assertEqual(answers[0].value, "продукт")
+
 
 class FinishTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -437,6 +458,29 @@ class KnownTests(unittest.TestCase):
         self.assertFalse(is_known({}, "project.purpose"))
         self.assertFalse(is_known({"project": {"boundaries": []}}, "project.boundaries"))
         self.assertTrue(is_known({"process": {"tiers": False}}, "process.tiers"))
+
+
+class PlanJsonTests(unittest.TestCase):
+    def prepared(self) -> Prepared:
+        item = Question(
+            id="stack",
+            text="Какой стек?",
+            slots=("stack.runtime", "tests.commands"),
+            why="нужно",
+            source="universal",
+        )
+        return Prepared(values={}, questions=(item,), batch=(item,), hits=(), misses=())
+
+    def test_slots_are_described(self) -> None:
+        payload = plan_payload(self.prepared())
+        slots = payload["questions"][0]["slots"]
+        self.assertEqual(slots[0]["path"], "stack.runtime")
+        self.assertTrue(slots[0]["evidence"])
+        self.assertEqual(slots[1]["type"], "object")
+        self.assertEqual(slots[1]["additional"], "string")
+
+    def test_describe_unknown_slot(self) -> None:
+        self.assertEqual(describe_slot("project.missing"), {"path": "project.missing", "type": "unknown"})
 
 
 if __name__ == "__main__":

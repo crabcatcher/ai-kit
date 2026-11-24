@@ -2,6 +2,7 @@ import sys
 import tomllib
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from ai_kit.gates import (
     Gate,
@@ -125,6 +126,24 @@ class GateRunTests(unittest.TestCase):
         result = run_gates([item], ROOT)
         self.assertEqual(result[0].severity, "gap")
         self.assertIn("не подходит", result[0].message)
+
+    def test_baseline_is_substituted(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "baseline.toml").write_text('schema_version = "1"\n', encoding="utf-8")
+            code = (
+                "import pathlib, sys; "
+                "raise SystemExit(0 if pathlib.Path(sys.argv[1]).is_file() else 1)"
+            )
+            item = Gate("check", "Инвариант", PYTHON, None, (PYTHON, "-c", code, "{baseline}"))
+            self.assertEqual(run_gates([item], root), [])
+
+    def test_missing_baseline_is_gap(self) -> None:
+        with TemporaryDirectory() as temporary:
+            item = Gate("check", "Инвариант", PYTHON, None, (PYTHON, "-c", "pass", "{baseline}"))
+            result = run_gates([item], Path(temporary))
+            self.assertEqual(result[0].severity, "gap")
+            self.assertIn("baseline.toml", result[0].message)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,12 @@
+import io
 import tomllib
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from ai_kit.init import InitError, Request, generate
+from ai_kit.init import InitError, Request, _apply_commands, generate
 from ai_kit.profile import parse
 from ai_kit.templates import TemplateError
 
@@ -122,6 +125,18 @@ class InitTests(unittest.TestCase):
         self.assertTrue(report.dry_run)
         self.assertFalse((self.target / "profile.toml").exists())
         self.assertFalse((self.target / ".project").exists())
+        self.assertFalse((self.target / "baseline.toml").exists())
+        self.assertFalse((self.target / "tools").exists())
+
+    def test_baseline_is_created(self) -> None:
+        generate(self.request())
+        self.assertTrue((self.target / "baseline.toml").is_file())
+
+    def test_precommit_artifacts_are_created(self) -> None:
+        generate(self.request())
+        script = self.read("tools/pre-commit.py")
+        self.assertIn("run-unit", script)
+        self.assertTrue((self.target / "tools" / "hooks" / "pre-commit").is_file())
 
     def test_scratch_project_from_answers(self) -> None:
         answers = self.target / "answers.toml"
@@ -184,6 +199,28 @@ class InitTests(unittest.TestCase):
         )
         with self.assertRaises(TemplateError):
             generate(self.request(adapter=adapter))
+
+    def test_adapter_commands_fill_missing_roles(self) -> None:
+        data = {"tests": {}}
+        _apply_commands(data, {"commands": [{"role": "test", "command": "run-tests"}]})
+        self.assertEqual(data["tests"]["commands"], {"test": "run-tests"})
+
+    def test_adapter_commands_reject_unknown_role(self) -> None:
+        with self.assertRaises(InitError):
+            _apply_commands({}, {"commands": [{"role": "smoke", "command": "run"}]})
+
+    def test_ask_cancel_writes_nothing(self) -> None:
+        with patch("builtins.input", side_effect=["", "", "", "n"]), redirect_stdout(io.StringIO()):
+            report = generate(self.request(ask=True))
+        self.assertTrue(report.cancelled)
+        self.assertFalse((self.target / "profile.toml").exists())
+
+    def test_ask_yes_writes_after_interview(self) -> None:
+        with patch("builtins.input", side_effect=["", "", ""]), redirect_stdout(io.StringIO()):
+            report = generate(self.request(ask=True, yes=True))
+        self.assertFalse(report.cancelled)
+        self.assertTrue((self.target / "profile.toml").is_file())
+        parse(tomllib.loads(self.read("profile.toml")))
 
 
 if __name__ == "__main__":

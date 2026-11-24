@@ -432,7 +432,7 @@ def apply_probe_hits(values: dict[str, Any], hits: list[ProbeHit]) -> dict[str, 
             continue
         if hit.field in filled:
             raise InterviewError([(hit.field, "значение уже заполнено другой пробой")])
-        _validate_value(node, hit.value, hit.field)
+        validate_value(node, hit.value, hit.field)
         _set_slot(result, hit.field, hit.value)
         filled.add(hit.field)
     return result
@@ -470,7 +470,66 @@ def plan_batch(questions: list[Question], values: dict[str, Any]) -> list[Questi
 
 
 def load_answers(path: Path) -> list[Answer]:
-    return parse_answers(tomllib.loads(path.read_text(encoding="utf-8")))
+    text = path.read_text(encoding="utf-8")
+    data = json.loads(text) if path.suffix == ".json" else tomllib.loads(text)
+    return parse_answers(data)
+
+
+def describe_slot(path: str) -> dict[str, Any]:
+    node = schema.resolve(path)
+    if node is None:
+        return {"path": path, "type": "unknown"}
+    kind = node.get("type", "unknown")
+    data: dict[str, Any] = {"path": path, "type": kind}
+    if schema.is_evidence(node):
+        data["evidence"] = True
+        data["answer"] = "name"
+    elif kind == "array":
+        data["items"] = node.get("items", {}).get("type", "unknown")
+    elif kind == "object":
+        properties = node.get("properties", {})
+        data["properties"] = {key: value.get("type", "unknown") for key, value in properties.items()}
+        if node.get("required"):
+            data["required"] = list(node["required"])
+        additional = node.get("additionalProperties")
+        if isinstance(additional, dict):
+            data["additional"] = additional.get("type", "unknown")
+    return data
+
+
+def plan_payload(prepared: Prepared) -> dict[str, Any]:
+    return {
+        "probes": {
+            "hits": [
+                {
+                    "probe": hit.probe_id,
+                    "field": hit.field,
+                    "name": hit.name,
+                    "value": hit.value,
+                    "evidence": hit.evidence,
+                }
+                for hit in prepared.hits
+            ],
+            "misses": [
+                {"probe": miss.probe_id, "field": miss.field, "reason": miss.reason}
+                for miss in prepared.misses
+            ],
+        },
+        "questions": [
+            {
+                "id": question.id,
+                "text": question.text,
+                "why": question.why,
+                "source": question.source,
+                "slots": [describe_slot(slot) for slot in question.slots],
+            }
+            for question in prepared.batch
+        ],
+    }
+
+
+def plan_json(prepared: Prepared) -> str:
+    return json.dumps(plan_payload(prepared), ensure_ascii=False, indent=2)
 
 
 def parse_answers(data: dict[str, Any]) -> list[Answer]:
@@ -580,15 +639,13 @@ def apply_answers(
             _append_evidence(result, answer.slot, {"name": answer.name, "provenance": "answer"})
             answered += 1
             if answer.version:
-                unknowns.append(
-                    {
-                        "field": f"{answer.slot}.version",
-                        "question": f"Версия {answer.name} названа по памяти; подтвердите файлом-доказательством.",
-                    }
-                )
+                question_text = f"Версия {answer.name} названа по памяти; подтвердите файлом-доказательством."
+            else:
+                question_text = f"Версия {answer.name} не подтверждена; укажите файл-доказательство."
+            unknowns.append({"field": f"{answer.slot}.version", "question": question_text})
             continue
 
-        _validate_value(node, answer.value, answer.slot)
+        validate_value(node, answer.value, answer.slot)
         _set_slot(result, answer.slot, answer.value)
         answered += 1
 
@@ -708,14 +765,14 @@ def _set_slot(values: dict[str, Any], path: str, value: Any) -> None:
     node[parts[-1]] = value
 
 
-def _validate_value(node: dict[str, Any], value: Any, path: str) -> None:
+def validate_value(node: dict[str, Any], value: Any, path: str) -> None:
     kind = node.get("type")
     if kind == "array":
         if not isinstance(value, list):
             raise InterviewError([(path, "ожидается список")])
         item = node.get("items", {})
         for index, element in enumerate(value):
-            _validate_value(item, element, f"{path}[{index}]")
+            validate_value(item, element, f"{path}[{index}]")
         return
     if kind == "object":
         if not isinstance(value, dict):
@@ -727,9 +784,9 @@ def _validate_value(node: dict[str, Any], value: Any, path: str) -> None:
                 raise InterviewError([(f"{path}.{key}", "обязательное поле не заполнено")])
         for key, element in value.items():
             if key in properties:
-                _validate_value(properties[key], element, f"{path}.{key}")
+                validate_value(properties[key], element, f"{path}.{key}")
             elif isinstance(additional, dict):
-                _validate_value(additional, element, f"{path}.{key}")
+                validate_value(additional, element, f"{path}.{key}")
             else:
                 raise InterviewError([(f"{path}.{key}", "неизвестное поле")])
         return
@@ -818,6 +875,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         if "--plan" in args:
+            if "--json" in args:
+                print(plan_json(prepared))
+                return 0
             print(f"Пробы: найдено {len(prepared.hits)}, не найдено {len(prepared.misses)}.")
             for index, question in enumerate(prepared.batch, start=1):
                 print(f"{index}. {question.text}")

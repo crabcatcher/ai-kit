@@ -113,6 +113,16 @@ def run_gates(gates: list[Gate], root: Path) -> list[Diagnostic]:
     return diagnostics
 
 
+def _argv(gate: Gate, root: Path) -> list[str] | None:
+    baseline = root / "baseline.toml"
+    argv: list[str] = []
+    for token in gate.argv:
+        if "{baseline}" in token and not baseline.is_file():
+            return None
+        argv.append(token.replace("{baseline}", str(baseline)).replace("{project}", str(root)))
+    return argv
+
+
 def _run_gate(gate: Gate, root: Path) -> list[Diagnostic]:
     if gate.binary:
         version, error = probe_binary(gate.binary, root)
@@ -131,7 +141,9 @@ def _run_gate(gate: Gate, root: Path) -> list[Diagnostic]:
                     )
                 ]
 
-    argv = [token.replace("{project}", str(root)) for token in gate.argv]
+    argv = _argv(gate, root)
+    if argv is None:
+        return [Diagnostic("gate", "gap", gate.id, f"гейт {gate.id}: нет baseline.toml")]
     try:
         completed = subprocess.run(
             argv,

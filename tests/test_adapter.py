@@ -98,6 +98,22 @@ class AdapterTests(unittest.TestCase):
             report.to_table(),
         )
 
+    def test_partial_profile_is_error(self) -> None:
+        profile = self.project / "base.toml"
+        profile.write_text('[project]\nname = "x"\n', encoding="utf-8")
+        report = adapter.validate(FIXTURE, profile, self.project)
+        self.assertGreaterEqual(report.errors, 1, report.to_table())
+        self.assertTrue(
+            any(item.code == "profile" and item.severity == "error" for item in report.diagnostics),
+            report.to_table(),
+        )
+
+    def test_minimal_profile_with_bad_docs_is_error(self) -> None:
+        profile = self.project / "base.toml"
+        profile.write_text('schema_version = "1"\n\n[docs]\ndir = 5\n', encoding="utf-8")
+        report = adapter.validate(FIXTURE, profile, self.project)
+        self.assertGreaterEqual(report.errors, 1, report.to_table())
+
     def test_fragment_feature_unreadable_is_diagnostic(self) -> None:
         feature = self.project / ".project" / "features" / "health.md"
         feature.parent.mkdir(parents=True)

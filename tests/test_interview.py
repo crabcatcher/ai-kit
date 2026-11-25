@@ -171,6 +171,12 @@ class ProbeParsingTests(unittest.TestCase):
         probes = load_probes(adapter_data())
         self.assertEqual([item.id for item in probes], ["runtime-version", "framework-name"])
 
+    def test_provenance_defaults_to_probe(self) -> None:
+        data = self.probe()
+        del data["provenance"]
+        probes = parse_probes([data])
+        self.assertEqual(probes[0].provenance, "probe")
+
     def test_absolute_glob_rejected(self) -> None:
         self.assert_error([self.probe(globs=["/etc/manifest.json"])], "probes[0].globs[0]")
 

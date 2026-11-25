@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ai_kit import detect, gaps, gates, init, inputs, interview, rules, templates
+from ai_kit import detect, gaps, gates, init, inputs, interview, profile, rules, templates
 from ai_kit.args import UsageError, ensure_known, normalize
 from ai_kit.console import configure_console
 from ai_kit.diagnostics import Diagnostic, Report
@@ -17,6 +17,9 @@ TOP_KEYS = {
     "id", "detect", "probes", "commands", "gates", "inputs",
     "rules", "docs_fragments", "questions", "gaps",
 }
+
+MINIMAL_PROFILE_KEYS = {"schema_version", "docs", "inputs"}
+MINIMAL_DOCS_KEYS = {"language", "dir"}
 
 
 def validate(
@@ -46,6 +49,7 @@ def validate(
                 Diagnostic("profile", "error", profile_path.name, f"профиль не читается: {error}")
             )
         else:
+            _profile_schema(values, diagnostics)
             values = _with_docs(values, diagnostics)
 
     try:
@@ -79,6 +83,37 @@ def validate(
     for item in diagnostics:
         unique[(item.code, item.severity, item.path, item.message)] = item
     return Report(tuple(unique.values()))
+
+
+def _profile_schema(values: dict[str, Any], diagnostics: list[Diagnostic]) -> None:
+    if _minimal_profile(values):
+        return
+    try:
+        profile.parse(values)
+    except profile.ProfileError as error:
+        diagnostics.extend(
+            Diagnostic("profile", "error", path, message) for path, message in error.errors
+        )
+
+
+def _minimal_profile(values: Any) -> bool:
+    if not isinstance(values, dict):
+        return False
+    if set(values) - MINIMAL_PROFILE_KEYS:
+        return False
+    schema_version = values.get("schema_version")
+    if schema_version is not None and not _non_empty_text(schema_version):
+        return False
+    docs = values.get("docs")
+    if docs is None:
+        return True
+    if not isinstance(docs, dict) or set(docs) - MINIMAL_DOCS_KEYS:
+        return False
+    return all(_non_empty_text(value) for value in docs.values())
+
+
+def _non_empty_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _with_docs(values: dict[str, Any], diagnostics: list[Diagnostic]) -> dict[str, Any]:

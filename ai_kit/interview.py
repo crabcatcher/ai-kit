@@ -375,8 +375,8 @@ def parse_probes(entries: Any) -> list[Probe]:
             elif not isinstance(value_path, str) or EXTRACT_PATH.fullmatch(value_path) is None:
                 errors.append((f"{place}.value_path", "ожидается путь через точки"))
 
-        if entry.get("provenance") != "probe":
-            errors.append((f"{place}.provenance", "проба всегда даёт probe"))
+        if entry.get("provenance", "probe") != "probe":
+            errors.append((f"{place}.provenance", "ожидается probe; поле можно не указывать"))
 
         if probe_id and globs and node is not None and isinstance(extract, str):
             probes.append(

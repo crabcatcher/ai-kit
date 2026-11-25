@@ -242,7 +242,7 @@ class RenderTests(unittest.TestCase):
     def test_empty_generated_table_removes_section(self) -> None:
         output = self.rendered("registry")
         self.assertNotIn("## Канон", output)
-        self.assertNotIn("## Адаптер", output)
+        self.assertNotIn("## Стек и архитектура", output)
         self.assertIn("## Метки", output)
 
     def test_generated_fragment_fills_table(self) -> None:

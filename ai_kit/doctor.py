@@ -599,56 +599,89 @@ def _stale_diagnostics(
         return []
     hits, misses = interview.run_probes(request.root, stack_probes)
     names_by_field: dict[str, set[str]] = {}
+    versions_by_field: dict[str, dict[str, set[str]]] = {}
     for hit in hits:
-        if hit.name:
-            names_by_field.setdefault(hit.field, set()).add(hit.name.casefold())
+        if not hit.name:
+            continue
+        name = hit.name.casefold()
+        names_by_field.setdefault(hit.field, set()).add(name)
+        if hit.value is not None:
+            versions_by_field.setdefault(hit.field, {}).setdefault(name, set()).add(hit.value)
     reasons_by_field: dict[str, list[str]] = {}
     for miss in misses:
         reasons_by_field.setdefault(miss.field, []).append(miss.reason)
     diagnostics: list[Diagnostic] = []
     for field in sorted({probe.field for probe in stack_probes}):
-        names = _stack_names(parsed, field)
-        if not names:
+        entries = _stack_entries(parsed, field)
+        if not entries:
             continue
         confirmed = names_by_field.get(field, set())
-        stale = [name for name in names if name.casefold() not in confirmed]
-        if confirmed and stale:
-            diagnostics.append(
-                Diagnostic(
-                    "stale",
-                    "warning",
-                    field,
-                    "проба не подтвердила: " + ", ".join(sorted(stale)),
+        stale_names = [name for name, _ in entries if name.casefold() not in confirmed]
+        if confirmed:
+            if stale_names:
+                diagnostics.append(
+                    Diagnostic(
+                        "stale",
+                        "warning",
+                        field,
+                        "проба не подтвердила: " + ", ".join(sorted(stale_names)),
+                    )
                 )
-            )
-        elif not confirmed and reasons_by_field.get(field):
+            stale_versions = _stale_versions(entries, field, confirmed, versions_by_field)
+            if stale_versions:
+                diagnostics.append(
+                    Diagnostic(
+                        "stale",
+                        "warning",
+                        field,
+                        "проба не подтвердила версию: " + ", ".join(stale_versions),
+                    )
+                )
+        elif reasons_by_field.get(field):
             diagnostics.append(
                 Diagnostic(
                     "stale",
                     "warning",
                     field,
                     "проба не нашла значение; старые факты поля не подтверждены: "
-                    + ", ".join(sorted(names)),
+                    + ", ".join(sorted(name for name, _ in entries)),
                 )
             )
     return diagnostics
 
 
-def _stack_names(parsed: profile.Profile, field: str) -> set[str]:
+def _stack_entries(parsed: profile.Profile, field: str) -> list[tuple[str, str | None]]:
     if not field.startswith("stack."):
-        return set()
+        return []
     key = field.split(".", 1)[1]
     stack_fields = {item.name for item in dc_fields(profile.Stack)}
     if key not in stack_fields:
-        return set()
+        return []
     items = getattr(parsed.stack, key)
     if not isinstance(items, list):
-        return set()
-    return {
-        item.name
+        return []
+    return [
+        (item.name, item.version)
         for item in items
         if item.provenance == "probe" and item.evidence
-    }
+    ]
+
+
+def _stale_versions(
+    entries: list[tuple[str, str | None]],
+    field: str,
+    confirmed: set[str],
+    versions_by_field: dict[str, dict[str, set[str]]],
+) -> list[str]:
+    result: list[str] = []
+    for name, version in entries:
+        if version is None or name.casefold() not in confirmed:
+            continue
+        found = sorted(versions_by_field.get(field, {}).get(name.casefold(), set()))
+        if version in found:
+            continue
+        result.append(f"{name} (в профиле {version}, найдено {', '.join(found) or '—'})")
+    return result
 
 
 def _code_paths(text: str) -> list[str]:

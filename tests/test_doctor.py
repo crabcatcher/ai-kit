@@ -315,7 +315,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_stale_names_are_case_insensitive(self) -> None:
         (self.target / "manifest.json").write_text(
-            '{"dependencies": {"express": "4"}}', encoding="utf-8"
+            '{"dependencies": {"express": "1"}}', encoding="utf-8"
         )
         adapter = self.write_adapter(
             "[[probes]]\n"
@@ -326,10 +326,36 @@ class DoctorTests(unittest.TestCase):
             'extract = "json:dependencies.express"\n'
             'provenance = "probe"\n'
         )
-        self.make(adapter)
+        self.make()
         self.add_evidence("stack.frameworks", "express")
         report = self.doctor(adapter)
         self.assertFalse(any(item.code == "stale" for item in report.diagnostics), report.to_table())
+
+    def test_stale_version_change_warns(self) -> None:
+        (self.target / "manifest.json").write_text(
+            '{"dependencies": {"express": "0.1.0"}}', encoding="utf-8"
+        )
+        adapter = self.write_adapter(
+            "[[probes]]\n"
+            'id = "express"\n'
+            'globs = ["manifest.json"]\n'
+            'field = "stack.frameworks"\n'
+            'name = "Express"\n'
+            'extract = "json:dependencies.express"\n'
+            'provenance = "probe"\n'
+        )
+        self.make()
+        self.add_evidence("stack.frameworks", "Express")
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(
+                item.code == "stale"
+                and "версию" in item.message
+                and "0.1.0" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
 
     def test_stale_scalar_probe_warns(self) -> None:
         (self.target / "manifest.json").write_text('{"dependencies": {}}', encoding="utf-8")

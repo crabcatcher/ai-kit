@@ -1,0 +1,7 @@
+[[probes]]
+id = "express"
+globs = ["manifest.json"]
+field = "stack.frameworks"
+name = "Express"
+extract = "json:dependencies.express"
+provenance = "probe"

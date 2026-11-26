@@ -1,0 +1,13 @@
+{
+  "adapter": "adapter.toml",
+  "setup": [
+    {"write": {"path": "manifest.json", "text": "{\"dependencies\": {\"express\": \"4.18.0\"}}\n"}}
+  ],
+  "mutations": [
+    {"replace": {"path": "profile.toml", "old": "version = \"4.18.0\"", "new": "version = \"0.1.0\""}}
+  ],
+  "expect": [
+    {"code": "stale", "severity": "warning", "path": "stack.frameworks", "message": "не подтвердила версию"}
+  ],
+  "exit": 0
+}

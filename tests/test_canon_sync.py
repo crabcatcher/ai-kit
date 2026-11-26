@@ -24,6 +24,27 @@ class CanonSyncTests(unittest.TestCase):
     def test_sixteen_axioms(self) -> None:
         self.assertEqual(len(self.canon_titles()), 16)
 
+    def test_current_state_is_axiom(self) -> None:
+        text = CANON.read_text(encoding="utf-8")
+        section = text[text.index("## K1.") : text.index("## K2.")]
+        agents = (ROOT / "templates" / "AGENTS.md.tpl").read_text(encoding="utf-8")
+        agents = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", agents)
+        self.assertIn("текущее состояние", self.canon_titles()["K1"])
+        for phrase in (
+            "конструкции перехода",
+            "«было/стало»",
+            "«раньше/теперь»",
+            "«уже …»",
+            "«пока (не) …»",
+            "«ещё (не) …»",
+            "«раньше/позже» допустимы только о порядке шагов в сценарии",
+            "Прошлое остаётся в истории репозитория и описании изменения",
+            "хронология уместна только в журнале сбоев, где запись — событие (K13)",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, section)
+                self.assertIn(phrase, agents)
+
     def test_every_label_is_named_in_k4(self) -> None:
         text = CANON.read_text(encoding="utf-8")
         start = text.index("## K4.")

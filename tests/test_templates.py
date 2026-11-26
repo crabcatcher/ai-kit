@@ -273,6 +273,24 @@ class RenderTests(unittest.TestCase):
         text = "секреты только в окружении, не в репозитории"
         self.assertIn(text, self.rendered("security"))
 
+    def test_final_answer_is_fact_and_short(self) -> None:
+        output = self.rendered("pipeline")
+        self.assertIn("факт по артефактам", output)
+        self.assertIn("Ответ — без воды", output)
+
+    def test_docs_index_requires_current_state(self) -> None:
+        output = self.rendered("docs-index")
+        self.assertIn("Только текущее состояние", output)
+        self.assertIn("хронология запрещена", output)
+
+    def test_review_exempts_incident_log(self) -> None:
+        output = self.rendered("review")
+        self.assertIn("нет хронологии", output)
+        self.assertIn("журнал сбоев", output)
+
+    def test_development_requires_fresh_git_state(self) -> None:
+        self.assertIn("git status --short", self.rendered("development"))
+
     def test_fragment_with_heading_rejected(self) -> None:
         with self.assertRaises(TemplateError):
             self.rendered("architecture", fragments={"adapter:systems": "# Свой раздел"})

@@ -351,11 +351,84 @@ class DoctorTests(unittest.TestCase):
             any(
                 item.code == "stale"
                 and "версию" in item.message
+                and "в профиле 1" in item.message
                 and "0.1.0" in item.message
                 for item in report.diagnostics
             ),
             report.to_table(),
         )
+
+    def numeric_version_adapter(self) -> Path:
+        return self.write_adapter(
+            "[[probes]]\n"
+            'id = "node"\n'
+            'globs = ["manifest.json"]\n'
+            'field = "stack.tools"\n'
+            'name = "Node"\n'
+            'extract = "json:engines.node"\n'
+            'provenance = "probe"\n'
+        )
+
+    def test_stale_numeric_version_matches(self) -> None:
+        (self.target / "manifest.json").write_text('{"engines": {"node": 20}}', encoding="utf-8")
+        adapter = self.numeric_version_adapter()
+        self.make()
+        self.add_tool("Node", version="20")
+        report = self.doctor(adapter)
+        self.assertFalse(any(item.code == "stale" for item in report.diagnostics), report.to_table())
+
+    def test_stale_numeric_version_change_warns(self) -> None:
+        (self.target / "manifest.json").write_text('{"engines": {"node": 20}}', encoding="utf-8")
+        adapter = self.numeric_version_adapter()
+        self.make()
+        self.add_tool("Node", version="18")
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(
+                item.code == "stale"
+                and "версию" in item.message
+                and "в профиле 18" in item.message
+                and "20" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
+    def test_stale_keys_version_change_warns(self) -> None:
+        (self.target / "manifest.json").write_text(
+            '{"dependencies": {"express": "4.18.0"}}', encoding="utf-8"
+        )
+        adapter = self.keys_adapter()
+        self.make()
+        self.add_tool("express", version="1")
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(
+                item.code == "stale"
+                and "версию" in item.message
+                and "в профиле 1" in item.message
+                and "4.18.0" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
+    def test_stale_skips_version_when_probe_does_not_give_one(self) -> None:
+        (self.target / "manifest.json").write_text('{"engines": {"node": 20}}', encoding="utf-8")
+        adapter = self.write_adapter(
+            "[[probes]]\n"
+            'id = "node"\n'
+            'globs = ["manifest.json"]\n'
+            'field = "stack.tools"\n'
+            'name = "Node"\n'
+            'extract = "json:engines.node"\n'
+            'provenance = "probe"\n'
+            'version = "none"\n'
+        )
+        self.make()
+        self.add_tool("Node", version="18")
+        report = self.doctor(adapter)
+        self.assertFalse(any(item.code == "stale" for item in report.diagnostics), report.to_table())
 
     def test_stale_scalar_probe_warns(self) -> None:
         (self.target / "manifest.json").write_text('{"dependencies": {}}', encoding="utf-8")

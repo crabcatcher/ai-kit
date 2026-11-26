@@ -606,7 +606,9 @@ def _stale_diagnostics(
         name = hit.name.casefold()
         names_by_field.setdefault(hit.field, set()).add(name)
         if hit.value is not None:
-            versions_by_field.setdefault(hit.field, {}).setdefault(name, set()).add(hit.value)
+            version = _probe_version(hit.value)
+            if version is not None:
+                versions_by_field.setdefault(hit.field, {}).setdefault(name, set()).add(version)
     reasons_by_field: dict[str, list[str]] = {}
     for miss in misses:
         reasons_by_field.setdefault(miss.field, []).append(miss.reason)
@@ -616,6 +618,7 @@ def _stale_diagnostics(
         if not entries:
             continue
         confirmed = names_by_field.get(field, set())
+        entries = _unique_entries(entries)
         stale_names = [name for name, _ in entries if name.casefold() not in confirmed]
         if confirmed:
             if stale_names:
@@ -650,6 +653,20 @@ def _stale_diagnostics(
     return diagnostics
 
 
+def _unique_entries(entries: list[tuple[str, str | None]]) -> list[tuple[str, str | None]]:
+    seen: dict[str, tuple[str, str | None]] = {}
+    for entry in entries:
+        seen.setdefault(entry[0].casefold(), entry)
+    return list(seen.values())
+
+
+def _probe_version(value: Any) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _stack_entries(parsed: profile.Profile, field: str) -> list[tuple[str, str | None]]:
     if not field.startswith("stack."):
         return []
@@ -678,9 +695,9 @@ def _stale_versions(
         if version is None or name.casefold() not in confirmed:
             continue
         found = sorted(versions_by_field.get(field, {}).get(name.casefold(), set()))
-        if version in found:
+        if not found or version in found:
             continue
-        result.append(f"{name} (в профиле {version}, найдено {', '.join(found) or '—'})")
+        result.append(f"{name} (в профиле {version}, найдено {', '.join(found)})")
     return result
 
 

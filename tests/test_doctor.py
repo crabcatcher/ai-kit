@@ -430,6 +430,63 @@ class DoctorTests(unittest.TestCase):
         report = self.doctor(adapter)
         self.assertFalse(any(item.code == "stale" for item in report.diagnostics), report.to_table())
 
+    def test_stale_skips_keys_probe_without_version(self) -> None:
+        (self.target / "manifest.json").write_text(
+            '{"dependencies": {"express": "1"}}', encoding="utf-8"
+        )
+        adapter = self.keys_adapter('version = "none"\n')
+        self.make()
+        self.add_tool("express", version="4")
+        report = self.doctor(adapter)
+        self.assertFalse(any(item.code == "stale" for item in report.diagnostics), report.to_table())
+
+    def test_stale_ignores_non_scalar_probe_value(self) -> None:
+        adapter = self.numeric_version_adapter()
+        self.make()
+        self.add_tool("Node", version="18")
+        for value in (True, {"schema": "1"}, ["1"], ""):
+            (self.target / "manifest.json").write_text(
+                json.dumps({"engines": {"node": value}}), encoding="utf-8"
+            )
+            report = self.doctor(adapter)
+            self.assertFalse(
+                any(item.code == "stale" for item in report.diagnostics),
+                f"{value!r}: {report.to_table()}",
+            )
+
+    def test_stale_checks_version_of_duplicate_name(self) -> None:
+        (self.target / "manifest.json").write_text('{"engines": {"node": 20}}', encoding="utf-8")
+        adapter = self.numeric_version_adapter()
+        self.make()
+        self.add_tool("Node", version="20")
+        self.add_tool("node", version="18")
+        report = self.doctor(adapter)
+        self.assertTrue(
+            any(
+                item.code == "stale"
+                and "в профиле 18" in item.message
+                and "20" in item.message
+                for item in report.diagnostics
+            ),
+            report.to_table(),
+        )
+
+    def test_stale_duplicate_names_give_one_line(self) -> None:
+        (self.target / "manifest.json").write_text(
+            '{"dependencies": {"express": "1"}}', encoding="utf-8"
+        )
+        adapter = self.keys_adapter()
+        self.make()
+        self.add_tool("Gone", version="1")
+        self.add_tool("gone", version="1")
+        report = self.doctor(adapter)
+        messages = [
+            item.message
+            for item in report.diagnostics
+            if item.code == "stale" and "не подтвердила:" in item.message
+        ]
+        self.assertEqual(messages, ["проба не подтвердила: Gone"], report.to_table())
+
     def test_stale_scalar_probe_warns(self) -> None:
         (self.target / "manifest.json").write_text('{"dependencies": {}}', encoding="utf-8")
         adapter = self.write_adapter(

@@ -606,7 +606,7 @@ def _stale_diagnostics(
         name = hit.name.casefold()
         names_by_field.setdefault(hit.field, set()).add(name)
         if hit.value is not None:
-            version = _probe_version(hit.value)
+            version = interview.version_value(hit.value)
             if version is not None:
                 versions_by_field.setdefault(hit.field, {}).setdefault(name, set()).add(version)
     reasons_by_field: dict[str, list[str]] = {}
@@ -618,8 +618,9 @@ def _stale_diagnostics(
         if not entries:
             continue
         confirmed = names_by_field.get(field, set())
-        entries = _unique_entries(entries)
-        stale_names = [name for name, _ in entries if name.casefold() not in confirmed]
+        stale_names = [
+            name for name in _unique_names(entries) if name.casefold() not in confirmed
+        ]
         if confirmed:
             if stale_names:
                 diagnostics.append(
@@ -647,24 +648,17 @@ def _stale_diagnostics(
                     "warning",
                     field,
                     "проба не нашла значение; старые факты поля не подтверждены: "
-                    + ", ".join(sorted(name for name, _ in entries)),
+                    + ", ".join(sorted(_unique_names(entries))),
                 )
             )
     return diagnostics
 
 
-def _unique_entries(entries: list[tuple[str, str | None]]) -> list[tuple[str, str | None]]:
-    seen: dict[str, tuple[str, str | None]] = {}
-    for entry in entries:
-        seen.setdefault(entry[0].casefold(), entry)
-    return list(seen.values())
-
-
-def _probe_version(value: Any) -> str | None:
-    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
-        return None
-    text = str(value).strip()
-    return text or None
+def _unique_names(entries: list[tuple[str, str | None]]) -> list[str]:
+    names: dict[str, str] = {}
+    for name, _ in entries:
+        names.setdefault(name.casefold(), name)
+    return list(names.values())
 
 
 def _stack_entries(parsed: profile.Profile, field: str) -> list[tuple[str, str | None]]:
@@ -691,10 +685,13 @@ def _stale_versions(
     versions_by_field: dict[str, dict[str, set[str]]],
 ) -> list[str]:
     result: list[str] = []
+    seen: set[tuple[str, str | None]] = set()
     for name, version in entries:
-        if version is None or name.casefold() not in confirmed:
+        key = name.casefold()
+        if version is None or key not in confirmed or (key, version) in seen:
             continue
-        found = sorted(versions_by_field.get(field, {}).get(name.casefold(), set()))
+        seen.add((key, version))
+        found = sorted(versions_by_field.get(field, {}).get(key, set()))
         if not found or version in found:
             continue
         result.append(f"{name} (в профиле {version}, найдено {', '.join(found)})")

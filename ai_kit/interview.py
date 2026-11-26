@@ -459,7 +459,7 @@ def _keys_value(extract: str, text: str) -> tuple[dict[str, Any] | None, str]:
     return node, ""
 
 
-def _version_value(value: Any) -> str | None:
+def version_value(value: Any) -> str | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, (str, int, float, date, time, datetime)):
@@ -529,7 +529,7 @@ def _run_probe(root: Path, probe: Probe) -> list[ProbeHit] | ProbeMiss:
                         raw = _value_at(raw, probe.value_path)
                         if raw is ABSENT:
                             raw = None
-                    value = _version_value(raw) if probe.version_required else None
+                    value = version_value(raw) if probe.version_required else None
                     result.append(
                         ProbeHit(
                             probe_id=probe.id,
